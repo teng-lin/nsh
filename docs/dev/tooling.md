@@ -934,7 +934,11 @@ program that describes them, builds the hosts and runners with them, and does ev
   it ships besides its runners (`app.json` and the crates' assets); `.nsh/types` is written for it only when it has a
   `tsconfig.json` (for its test files). `nsh check` runs `cargo check` on its crates, and `tsc` with that
   `tsconfig.json`. The other commands refuse a Rust app's entry, before building anything.
-  `examples/gallery-rs` is one (`"root": "Gallery"`).
+  `examples/gallery-rs` is one (`"root": "Gallery"`). `"features"` (a list of `rust_app::PLATFORM_FEATURES`:
+  `shader`, `editor`, `emoji-picker`, `highlight`, `math`, `plot`, `rich-editor`, `term`) builds the runners with
+  only those platform features and `nsh-base` without its defaults; without it they get all of them
+  (`RUST_APP_PLATFORM`). An app that shows no editor, chart, terminal or math leaves their code out: an Android TV
+  app's `libnsh.so` went from 44 MB to 27 MB with `"features": []`.
 - The files the sets' crates ship (`Registry::assets(assets!())`: a crate's `assets/` directory, published as
   `asset:/@<package>/<path>`, so each crate's are apart) go with the app's imported assets: the dev server serves them
   (`DevServer::serve_files`), `nsh build` / `package` / `publish` copy them (`build::Built::assets`: each file's path

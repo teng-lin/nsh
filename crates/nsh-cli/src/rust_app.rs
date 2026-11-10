@@ -290,6 +290,17 @@ pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
+/// The platform features a Rust app may choose (`nsh.json` `"features"`).
+pub(crate) const PLATFORM_FEATURES: &[&str] = &[
+    "shader",
+    "editor",
+    "emoji-picker",
+    "highlight",
+    "math",
+    "plot",
+    "rich-editor",
+    "term",
+];
 
 /// The checkout of nsh the crate directory `path` is in: the nearest
 /// directory above it with `crates/nsh-core` (GPUI's crates are in
@@ -346,6 +357,10 @@ pub(crate) struct RootConfig {
     /// The app's translations (`locales/`) as JSON, written to the
     /// workspace and compiled into the runners.
     translations: Option<PathBuf>,
+    /// `"features"`: the platform features its runners build with
+    /// ([`PLATFORM_FEATURES`], checked); `None`: all of them. An app that
+    /// shows no editor, chart or terminal leaves their code out.
+    features: Option<Vec<String>>,
 }
 
 /// Whether `entry` is a Rust app's (`entry::resolve` gives its `nsh.json`
@@ -639,6 +654,27 @@ fn root_config(
         write(&path, &nsh_i18n::translations_json(&translations))?;
         Some(path)
     };
+    let features = match config.get("features") {
+        None => None,
+        Some(list) => {
+            let list = list
+                .as_array()
+                .context("nsh.json: \"features\" is a list of nsh features")?;
+            let mut features = Vec::with_capacity(list.len());
+            for f in list {
+                let f = f
+                    .as_str()
+                    .context("nsh.json: \"features\" lists feature names")?;
+                anyhow::ensure!(
+                    PLATFORM_FEATURES.contains(&f),
+                    "nsh.json: unknown feature {f:?} in \"features\" (known: {})",
+                    PLATFORM_FEATURES.join(", ")
+                );
+                features.push(f.to_owned());
+            }
+            Some(features)
+        }
+    };
     Ok(RootConfig {
         component,
         theme,
@@ -648,6 +684,7 @@ fn root_config(
         url_schemes,
         window,
         translations,
+        features,
     })
 }
 
@@ -1062,6 +1099,24 @@ fn write(path: &Path, contents: &str) -> anyhow::Result<()> {
 }
 
 impl RustApp {
+    /// The platform crate's features for the Rust app's runners: those
+    /// `nsh.json` `"features"` names, else [`RUST_APP_PLATFORM`]'s.
+    fn platform_features(&self) -> String {
+        match self.root.as_ref().and_then(|r| r.features.as_ref()) {
+            Some(list) => format!(", default-features = false, features = {list:?}"),
+            None => RUST_APP_PLATFORM.to_owned(),
+        }
+    }
+
+    /// `nsh-base` for the Rust app's runners: its features come from the
+    /// platform crate's when `nsh.json` chooses them.
+    fn base_features(&self) -> &'static str {
+        match self.root.as_ref().and_then(|r| r.features.as_ref()) {
+            Some(_) => ", default-features = false",
+            None => HIGHLIGHT,
+        }
+    }
+
     /// Its binaries' names, after the app ([`bin_name`]), so they do not
     /// clash with the app's own binaries in its `target`.
     fn bin(&self, what: &str) -> String {
@@ -1429,8 +1484,9 @@ panic = \"abort\"
                 self.bin("rust-android"),
                 self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
-                self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep("nsh-platform-android", RUST_APP_PLATFORM),
+                self.nsh.dep("nsh-base", self.base_features()),
+                self.nsh
+                    .dep("nsh-platform-android", &self.platform_features()),
             ),
         )?;
         write(
@@ -1564,8 +1620,8 @@ panic = \"abort\"
                 self.bin(dir),
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
-                self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, RUST_APP_PLATFORM),
+                self.nsh.dep("nsh-base", self.base_features()),
+                self.nsh.dep(platform, &self.platform_features()),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -2922,6 +2978,7 @@ mod tests {
                 url_schemes: Vec::new(),
                 window: None,
                 translations: None,
+                features: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
             app.write_workspace().unwrap();
@@ -3105,6 +3162,49 @@ mod tests {
     }
 
     #[test]
+    fn a_rust_app_chooses_its_platform_features() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-features-{}", std::process::id()));
+        let ws = dir.join(".nsh/rust");
+        std::fs::create_dir_all(&ws).unwrap();
+        let config = |json: &str| serde_json::from_str::<serde_json::Value>(json).unwrap();
+        let root = |json: &str| super::root_config(&dir, &config(json), &ws);
+        assert_eq!(root(r#"{ "root": "App" }"#).unwrap().features, None);
+        assert_eq!(
+            root(r#"{ "root": "App", "features": ["shader"] }"#)
+                .unwrap()
+                .features,
+            Some(vec!["shader".to_owned()])
+        );
+        for bad in [
+            r#"{ "root": "App", "features": "shader" }"#,
+            r#"{ "root": "App", "features": ["shaders"] }"#,
+            r#"{ "root": "App", "features": [1] }"#,
+        ] {
+            assert!(root(bad).is_err(), "{bad}");
+        }
+        // The runners build with exactly those, nsh-base without defaults.
+        let manifest = |features: Option<Vec<String>>| {
+            let mut config = root(r#"{ "root": "App" }"#).unwrap();
+            config.features = features;
+            let app = app(&dir, &[("tv", dir.join("native"))], Some(config));
+            app.write_workspace().unwrap();
+            std::fs::read_to_string(app.workspace.join("rust-android/Cargo.toml")).unwrap()
+        };
+        let chosen = manifest(Some(Vec::new()));
+        assert!(
+            chosen.contains("nsh-platform-android\", default-features = false, features = [] }"),
+            "{chosen}"
+        );
+        assert!(
+            chosen.contains("nsh-base\", default-features = false }"),
+            "{chosen}"
+        );
+        let all = manifest(None);
+        assert!(all.contains(super::RUST_APP_PLATFORM), "{all}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_rust_app_declares_its_root_theme_and_appearance() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-root-{}", std::process::id()));
         let ws = dir.join(".nsh/rust");
@@ -3181,6 +3281,7 @@ mod tests {
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
                 translations: None,
+                features: None,
             },
         );
         for line in [
@@ -3213,6 +3314,7 @@ mod tests {
                 url_schemes: Vec::new(),
                 window: None,
                 translations: None,
+                features: None,
             }),
         );
         app.write_workspace().unwrap();
@@ -3896,6 +3998,7 @@ panic = \"abort\"
                 url_schemes: Vec::new(),
                 window: None,
                 translations: None,
+                features: None,
             }),
         );
         app.write_workspace().unwrap();
