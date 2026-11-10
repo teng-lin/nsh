@@ -19549,6 +19549,70 @@ mod views {
         assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
     }
 
+    /// Logs each part of an OK press it hears.
+    #[component]
+    fn LongPress() -> impl IntoElement {
+        let log = signal(String::new());
+        on_key_event(
+            "enter",
+            crate::element::KeyOptions::default(),
+            move |e: &crate::element::KeyCommand| {
+                log.update(|l| {
+                    l.push_str(&format!(
+                        "{}:{:?}:{} ",
+                        e.keystroke,
+                        e.phase,
+                        e.held.as_millis()
+                    ))
+                })
+            },
+        );
+        text(move || log.get())
+    }
+
+    #[test]
+    fn a_views_binding_hears_its_keys_release() {
+        use crate::keymap::{KeyPhase, KeyReport};
+        let mut c = core();
+        c.mount_root(&Root::new::<LongPress>(|| ()));
+        let batch = c.commit().unwrap();
+        let table = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+            .expect("a table");
+        let [binding] = table.bindings() else {
+            panic!("{table:?}");
+        };
+        // It asks the platform for its releases.
+        assert!(binding.release);
+        let mut keys = crate::keymap::HeldKeys::default();
+        let ok = binding.keystroke;
+        let ms = std::time::Duration::from_millis;
+        let down = keys.press(&table, ROOT_ID, 23, ok, false, false, ms(0));
+        assert!(down.consumed);
+        assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &down.report.unwrap()));
+        let up = keys.release(23, ms(640));
+        assert!(up.consumed);
+        assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &up.report.unwrap()));
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["enter:Press:0 enter:Release:640 "]
+        );
+        // A bare id, from a platform reporting no releases, is a press.
+        let bare = EventPayload::Value(crate::PayloadValue::Number(f64::from(binding.id)));
+        assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &bare));
+        let report = KeyReport::from_payload(&bare).unwrap();
+        assert_eq!(report.phase, KeyPhase::Press);
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["enter:Press:0 enter:Release:640 enter:Press:0 "]
+        );
+    }
+
     #[test]
     fn jss_shortcuts_bound_before_any_view_stay_beside_the_views() {
         use crate::keymap::{KeyBinding, Keymap, Keystroke, When};

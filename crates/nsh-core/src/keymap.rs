@@ -18,7 +18,7 @@
 //! layout's character of the same key, as menus do, so shortcuts work on
 //! any layout.
 
-use std::fmt;
+use std::{fmt, time::Duration};
 
 use crate::platform::Os;
 
@@ -919,6 +919,11 @@ pub struct KeyBinding {
     /// the main window, a dialog root for a window of the app's own): it
     /// fires only for keys pressed there. `None`: in any window.
     pub window: Option<crate::NodeId>,
+    /// It fires again when its key is released, and every report says
+    /// which part of the press it is ([`KeyBinding::command`]): an app
+    /// tells a long press from a short one this way. Platforms that see
+    /// releases report them ([`HeldKeys`]).
+    pub release: bool,
 }
 
 impl KeyBinding {
@@ -937,6 +942,31 @@ impl KeyBinding {
             repeat,
             pass_through: false,
             window: None,
+            release: false,
+        }
+    }
+
+    /// The binding firing on its key's release too when `release`
+    /// ([`Self::release`]).
+    pub fn reporting_releases(mut self, release: bool) -> KeyBinding {
+        self.release = release;
+        self
+    }
+
+    /// The payload of the root's [`crate::EventKind::KeyCommand`] for this
+    /// binding firing in `phase`, its key down for `held`: the binding's id
+    /// for a binding that does not report releases (what JS's bindings
+    /// get), else the id, the phase and the time held ([`KeyReport`]).
+    pub fn command(&self, phase: KeyPhase, held: Duration) -> crate::EventPayload {
+        if self.release {
+            KeyReport {
+                id: self.id,
+                phase,
+                held,
+            }
+            .payload()
+        } else {
+            crate::EventPayload::Value(crate::PayloadValue::Number(f64::from(self.id)))
         }
     }
 
@@ -990,6 +1020,94 @@ impl KeyMatch {
     }
 }
 
+/// Which part of a key's press a binding fires on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum KeyPhase {
+    /// The key went down.
+    #[default]
+    Press,
+    /// An auto-repeat of the held key (a binding that repeats).
+    Repeat,
+    /// The key went up (a binding that reports releases).
+    Release,
+}
+
+impl KeyPhase {
+    fn name(self) -> &'static str {
+        match self {
+            KeyPhase::Press => "press",
+            KeyPhase::Repeat => "repeat",
+            KeyPhase::Release => "release",
+        }
+    }
+}
+
+/// A binding firing, as a binding that reports releases tells it
+/// ([`KeyBinding::command`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct KeyReport {
+    /// The binding ([`KeyBinding::id`]).
+    pub id: u32,
+    /// Which part of the press.
+    pub phase: KeyPhase,
+    /// How long the key has been down: zero on the press, the time since
+    /// it went down on an auto-repeat and on the release.
+    pub held: Duration,
+}
+
+impl KeyReport {
+    /// The root's [`crate::EventKind::KeyCommand`] payload: `{ id, phase,
+    /// held }`, `held` in whole milliseconds.
+    pub fn payload(&self) -> crate::EventPayload {
+        use crate::PayloadValue as V;
+        crate::EventPayload::Map(vec![
+            ("id", V::Number(f64::from(self.id))),
+            ("phase", V::Str(self.phase.name().to_owned())),
+            ("held", V::Number(self.held.as_millis() as f64)),
+        ])
+    }
+
+    /// The report a [`crate::EventKind::KeyCommand`] payload carries: a
+    /// bare id is a press ([`KeyBinding::command`]).
+    pub fn from_payload(payload: &crate::EventPayload) -> Option<KeyReport> {
+        use crate::{EventPayload, PayloadValue as V};
+        let id = |n: f64| (0.0..=f64::from(u32::MAX)).contains(&n).then_some(n as u32);
+        match payload {
+            EventPayload::Value(V::Number(n)) => Some(KeyReport {
+                id: id(*n)?,
+                ..KeyReport::default()
+            }),
+            EventPayload::Map(fields) => {
+                let mut report = KeyReport::default();
+                let mut found = false;
+                for (key, value) in fields {
+                    match (*key, value) {
+                        ("id", V::Number(n)) => {
+                            report.id = id(*n)?;
+                            found = true;
+                        }
+                        ("phase", V::Str(phase)) => {
+                            report.phase = match phase.as_str() {
+                                "press" => KeyPhase::Press,
+                                "repeat" => KeyPhase::Repeat,
+                                "release" => KeyPhase::Release,
+                                _ => return None,
+                            };
+                        }
+                        ("held", V::Number(ms)) if ms.is_finite() && *ms >= 0.0 => {
+                            report.held = Duration::from_millis(*ms as u64);
+                        }
+                        _ => {}
+                    }
+                }
+                found.then_some(report)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// The bindings of a surface, oldest first.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Keymap {
@@ -1010,6 +1128,11 @@ impl Keymap {
     /// The bindings, oldest first.
     pub fn bindings(&self) -> &[KeyBinding] {
         &self.bindings
+    }
+
+    /// Binding `id`.
+    pub fn binding(&self, id: u32) -> Option<&KeyBinding> {
+        self.bindings.iter().find(|b| b.id == id)
     }
 
     /// What a key does: the newest binding of `keystroke` that fires while
@@ -1045,6 +1168,114 @@ impl Keymap {
             Some(b) if b.pass_through => KeyMatch::Notify(b.id),
             Some(b) => KeyMatch::Fire(b.id),
         }
+    }
+}
+
+/// The keys a platform that sees each key go down and up has down, by
+/// its own key code `K`: whether their releases are consumed and which
+/// binding hears them ([`KeyBinding::release`]). Android's keys go through
+/// one (`Native.keyDown` / `Native.keyUp`).
+#[derive(Debug, Clone)]
+pub struct HeldKeys<K> {
+    keys: Vec<HeldKey<K>>,
+}
+
+impl<K> Default for HeldKeys<K> {
+    fn default() -> Self {
+        HeldKeys { keys: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HeldKey<K> {
+    key: K,
+    /// Its press was consumed: so is its release.
+    consumed: bool,
+    /// The binding reporting its release.
+    release: Option<u32>,
+}
+
+/// What a platform does with a key event ([`HeldKeys`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct KeyAction {
+    /// The platform consumes the key event.
+    pub consumed: bool,
+    /// The root's [`crate::EventKind::KeyCommand`] payload to report, if a
+    /// binding fires.
+    pub report: Option<crate::EventPayload>,
+}
+
+impl<K: Copy + PartialEq> HeldKeys<K> {
+    /// Key `key` went down in the window of root node `window`, typing
+    /// `keystroke` (`editing`, `repeat`: as [`Keymap::find_in`]), held for
+    /// `held` (zero, or the time since it went down on an auto-repeat).
+    #[allow(clippy::too_many_arguments)]
+    pub fn press(
+        &mut self,
+        keymap: &Keymap,
+        window: crate::NodeId,
+        key: K,
+        keystroke: Keystroke,
+        editing: bool,
+        repeat: bool,
+        held: Duration,
+    ) -> KeyAction {
+        if !repeat {
+            // A new press: what an earlier one left (its release lost) goes.
+            self.keys.retain(|k| k.key != key);
+        }
+        let found = keymap.find_in(window, keystroke, editing, repeat);
+        let binding = found.fired().and_then(|id| keymap.binding(id));
+        let release = binding.filter(|b| b.release).map(|b| b.id);
+        let phase = if repeat {
+            KeyPhase::Repeat
+        } else {
+            KeyPhase::Press
+        };
+        if found.consumed() || release.is_some() {
+            match self.keys.iter_mut().find(|k| k.key == key) {
+                Some(held) => {
+                    held.consumed |= found.consumed();
+                    held.release = release.or(held.release);
+                }
+                None => self.keys.push(HeldKey {
+                    key,
+                    consumed: found.consumed(),
+                    release,
+                }),
+            }
+        }
+        KeyAction {
+            consumed: found.consumed(),
+            report: binding.map(|b| b.command(phase, held)),
+        }
+    }
+
+    /// Key `key` went up after `held` down: its release is consumed when
+    /// its press was, and reported to the binding that asked
+    /// ([`KeyBinding::release`]).
+    pub fn release(&mut self, key: K, held: Duration) -> KeyAction {
+        let Some(i) = self.keys.iter().position(|k| k.key == key) else {
+            return KeyAction::default();
+        };
+        let key = self.keys.remove(i);
+        KeyAction {
+            consumed: key.consumed,
+            report: key.release.map(|id| {
+                KeyReport {
+                    id,
+                    phase: KeyPhase::Release,
+                    held,
+                }
+                .payload()
+            }),
+        }
+    }
+
+    /// Forgets every key (a new app).
+    pub fn clear(&mut self) {
+        self.keys.clear();
     }
 }
 
@@ -1437,5 +1668,148 @@ mod tests {
         assert_eq!(KeyMatch::Fire(3).fired(), Some(3));
         assert!(KeyMatch::Fire(3).consumed() && KeyMatch::Held.consumed());
         assert_eq!(KeyMatch::Held.fired(), None);
+    }
+
+    #[test]
+    fn a_binding_reporting_releases_hears_each_part_of_a_press() {
+        let ok = parse("enter").unwrap();
+        let ms = Duration::from_millis;
+        let report = |id, phase, held| Some(KeyReport { id, phase, held }.payload());
+        let map = Keymap::new(vec![
+            KeyBinding::new(1, ok, When::Auto, false).reporting_releases(true),
+        ]);
+        let mut keys = HeldKeys::default();
+        let root = crate::ROOT_ID;
+        // Down: consumed, a press.
+        let down = keys.press(&map, root, 23, ok, false, false, ms(0));
+        assert!(down.consumed);
+        assert_eq!(down.report, report(1, KeyPhase::Press, ms(0)));
+        // Auto-repeats are consumed, unreported: the binding does not repeat.
+        let held = keys.press(&map, root, 23, ok, false, true, ms(500));
+        assert_eq!((held.consumed, held.report), (true, None));
+        // Up: consumed and reported with the time held.
+        let up = keys.release(23, ms(820));
+        assert!(up.consumed);
+        assert_eq!(up.report, report(1, KeyPhase::Release, ms(820)));
+        // Once.
+        assert_eq!(keys.release(23, ms(900)), KeyAction::default());
+
+        // A repeating one hears the repeats too.
+        let repeating = Keymap::new(vec![
+            KeyBinding::new(2, ok, When::Auto, true).reporting_releases(true),
+        ]);
+        keys.press(&repeating, root, 23, ok, false, false, ms(0));
+        let again = keys.press(&repeating, root, 23, ok, false, true, ms(400));
+        assert_eq!(again.report, report(2, KeyPhase::Repeat, ms(400)));
+        assert_eq!(
+            keys.release(23, ms(450)).report,
+            report(2, KeyPhase::Release, ms(450))
+        );
+    }
+
+    #[test]
+    fn bindings_reporting_no_releases_keep_their_reports() {
+        let ok = parse("enter").unwrap();
+        let tab = parse("tab").unwrap();
+        let zero = Duration::ZERO;
+        let id = |n: u32| {
+            Some(crate::EventPayload::Value(crate::PayloadValue::Number(
+                f64::from(n),
+            )))
+        };
+        let map = Keymap::new(vec![
+            KeyBinding::new(1, ok, When::Auto, true),
+            KeyBinding::new(2, tab, When::Auto, false).passing_through(true),
+        ]);
+        let mut keys = HeldKeys::default();
+        let root = crate::ROOT_ID;
+        let down = keys.press(&map, root, 66, ok, false, false, zero);
+        assert_eq!((down.consumed, down.report), (true, id(1)));
+        // A repeat is reported as JS's bindings hear it: the id.
+        assert_eq!(
+            keys.press(&map, root, 66, ok, false, true, zero).report,
+            id(1)
+        );
+        // The release is consumed, unreported.
+        assert_eq!(
+            keys.release(66, zero),
+            KeyAction {
+                consumed: true,
+                report: None
+            }
+        );
+        // A key passing through leaves its release alone.
+        let tab_down = keys.press(&map, root, 61, tab, false, false, zero);
+        assert_eq!((tab_down.consumed, tab_down.report), (false, id(2)));
+        assert_eq!(keys.release(61, zero), KeyAction::default());
+        // No binding: nothing.
+        let other = parse("k").unwrap();
+        assert_eq!(
+            keys.press(&map, root, 39, other, false, false, zero),
+            KeyAction::default()
+        );
+        assert_eq!(keys.release(39, zero), KeyAction::default());
+    }
+
+    #[test]
+    fn a_passing_binding_reports_its_release_and_lets_it_go() {
+        let tab = parse("tab").unwrap();
+        let map = Keymap::new(vec![
+            KeyBinding::new(3, tab, When::Auto, false)
+                .passing_through(true)
+                .reporting_releases(true),
+        ]);
+        let mut keys = HeldKeys::default();
+        let down = keys.press(&map, crate::ROOT_ID, 61, tab, false, false, Duration::ZERO);
+        assert!(!down.consumed && down.report.is_some());
+        let up = keys.release(61, Duration::from_millis(80));
+        assert!(!up.consumed);
+        let report = KeyReport::from_payload(&up.report.unwrap()).unwrap();
+        assert_eq!((report.id, report.phase), (3, KeyPhase::Release));
+    }
+
+    #[test]
+    fn a_new_press_forgets_a_lost_release() {
+        let ok = parse("enter").unwrap();
+        let map = Keymap::new(vec![
+            KeyBinding::new(1, ok, When::Auto, false).reporting_releases(true),
+        ]);
+        let empty = Keymap::default();
+        let mut keys = HeldKeys::default();
+        let root = crate::ROOT_ID;
+        keys.press(&map, root, 23, ok, false, false, Duration::ZERO);
+        // The binding went before the key came up again and was pressed.
+        assert_eq!(
+            keys.press(&empty, root, 23, ok, false, false, Duration::ZERO),
+            KeyAction::default()
+        );
+        assert_eq!(keys.release(23, Duration::ZERO), KeyAction::default());
+    }
+
+    #[test]
+    fn key_reports_read_back() {
+        let report = KeyReport {
+            id: crate::element::keys::FIRST_ID + 4,
+            phase: KeyPhase::Release,
+            held: Duration::from_millis(1250),
+        };
+        assert_eq!(KeyReport::from_payload(&report.payload()), Some(report));
+        let bare = crate::EventPayload::Value(crate::PayloadValue::Number(7.0));
+        assert_eq!(
+            KeyReport::from_payload(&bare),
+            Some(KeyReport {
+                id: 7,
+                ..KeyReport::default()
+            })
+        );
+        assert_eq!(KeyReport::from_payload(&crate::EventPayload::None), None);
+        let binding = KeyBinding::new(5, parse("k").unwrap(), When::Auto, false);
+        assert_eq!(
+            KeyReport::from_payload(&binding.command(KeyPhase::Repeat, Duration::ZERO)),
+            Some(KeyReport {
+                id: 5,
+                ..KeyReport::default()
+            })
+        );
     }
 }

@@ -119,7 +119,8 @@ public class NshView extends FrameLayout {
             int action = e.getAction();
             if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
                 return true;
-            } else if (action == android.view.KeyEvent.ACTION_UP && Native.keyUp(handle, e.getKeyCode())) {
+            } else if (action == android.view.KeyEvent.ACTION_UP
+                    && Native.keyUp(handle, e.getKeyCode(), e.getEventTime() - e.getDownTime())) {
                 return true;
             }
         }
@@ -144,7 +145,7 @@ public class NshView extends FrameLayout {
         View focus = findFocus();
         boolean editing = focus != null && focus != this;
         return Native.keyDown(handle, e.getKeyCode(), e.getUnicodeChar(0), e.getMetaState(),
-                e.getRepeatCount() > 0, editing);
+                e.getRepeatCount() > 0, editing, e.getEventTime() - e.getDownTime());
     }
 
     private final Handler main = new Handler(Looper.getMainLooper());

@@ -287,7 +287,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the key is held (UIKit sends a held key's press once); Android in `NshView.dispatchKeyEvent` (before the focused
   view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
   encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
-  their handlers (`docs/dev/components.md`).
+  their handlers (`docs/dev/components.md`). A binding that reports releases (`KeyBinding::release`, Rust's
+  `on_key_event`) is reported with `{ id, phase, held }` (`KeyReport`: press, repeat or release, the time held)
+  instead of the bare id; Android reports its releases through `keymap::HeldKeys`, which tracks the keys down and
+  what their releases do (consumed, reported), the other platforms its presses only.
 - **System UI**: the status bar follows UIKit, where the topmost view controller's `preferredStatusBarStyle` decides
   and Info.plist holds the default: a page's or dialog's `statusBar` (`{ foreground, hidden, animated }`, a host prop
   of screens and modals, `ScreenProp::StatusBar`, decoded to a `StatusBarSetting`; `Screen::status_bar` /

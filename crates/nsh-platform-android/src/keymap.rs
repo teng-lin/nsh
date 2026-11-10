@@ -8,8 +8,11 @@
 //! fires a binding is consumed (the focused input never sees it: no caret
 //! move, no line break, no typed character) and reported to JS with the
 //! root's `KeyCommand` event; JS runs the handler afterwards. Its release
-//! is consumed too. The input method sees keys before the view hierarchy
-//! does, so a composition keeps its keys. `NshView` holds the focus when
+//! is consumed too, and reported to a binding that asks for it
+//! (`KeyBinding::release`, Rust's `on_key_event`) with the time the key was
+//! held, so an app can tell a long press from a short one ([`HeldKeys`],
+//! tested on the host in the core). The input method sees keys before the
+//! view hierarchy does, so a composition keeps its keys. `NshView` holds the focus when
 //! no input does, so keys reach it wherever the focus is in it; a text
 //! input or hosted view (a web view, a native component) having the focus
 //! is "in text". Android repeats a held key's events itself (their repeat
@@ -20,7 +23,7 @@
 //! otherwise, the US layout's of the same key when that is no ASCII, as on
 //! the desktops. `mod` is Control.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use jni::{
     JNIEnv,
@@ -28,8 +31,8 @@ use jni::{
     sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong},
 };
 use nsh_core::{
-    EventKind, EventPayload, PayloadValue, ROOT_ID,
-    keymap::{Key, Keymap, Keystroke, Modifiers},
+    EventKind, ROOT_ID,
+    keymap::{HeldKeys, Key, Keymap, Keystroke, Modifiers},
 };
 
 /// `KeyEvent.META_*_ON`.
@@ -42,8 +45,9 @@ const META_META_ON: i32 = 0x10000;
 #[derive(Default)]
 pub(crate) struct KeymapState {
     table: Option<Arc<Keymap>>,
-    /// Key codes whose press the table consumed.
-    held: Vec<i32>,
+    /// The keys down whose press the table consumed or whose release a
+    /// binding hears, by key code.
+    held: HeldKeys<i32>,
 }
 
 impl KeymapState {
@@ -78,9 +82,15 @@ pub(crate) fn keystroke(code: i32, unicode: i32, meta: i32) -> Option<Keystroke>
     Some(Keystroke { modifiers, key })
 }
 
-/// A key went down (`repeat`: an auto-repeat of a held key): whether a
-/// binding takes it, firing it.
+/// `held` milliseconds (`KeyEvent.getEventTime() - getDownTime()`).
+fn millis(held: jlong) -> Duration {
+    Duration::from_millis(held.max(0) as u64)
+}
+
+/// A key went down (`repeat`: an auto-repeat of a held key, down for
+/// `held` ms): whether a binding takes it, firing it.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 extern "system" fn Java_com_longbridge_nsh_Native_keyDown(
     _: JNIEnv<'_>,
     _: JClass<'_>,
@@ -90,55 +100,49 @@ extern "system" fn Java_com_longbridge_nsh_Native_keyDown(
     meta: jint,
     repeat: jboolean,
     editing: jboolean,
+    held: jlong,
 ) -> jboolean {
     // SAFETY: Java passes its live handle.
     let host = unsafe { crate::host::host(handle) };
     let Some(stroke) = keystroke(code, unicode, meta) else {
         return JNI_FALSE;
     };
-    let found = {
+    let action = {
         let mut state = host.keymap.lock().unwrap_or_else(|e| e.into_inner());
         let Some(table) = state.table.clone() else {
             return JNI_FALSE;
         };
-        let found = table.find(stroke, editing != 0, repeat != 0);
-        if found.consumed() && !state.held.contains(&code) {
-            state.held.push(code);
-        }
-        found
+        let (editing, repeat) = (editing != 0, repeat != 0);
+        state
+            .held
+            .press(&table, ROOT_ID, code, stroke, editing, repeat, millis(held))
     };
-    if let Some(id) = found.fired() {
-        host.dispatch(
-            ROOT_ID,
-            EventKind::KeyCommand,
-            EventPayload::Value(PayloadValue::Number(f64::from(id))),
-        );
+    if let Some(report) = action.report {
+        host.dispatch(ROOT_ID, EventKind::KeyCommand, report);
     }
-    if found.consumed() {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
-    }
+    if action.consumed { JNI_TRUE } else { JNI_FALSE }
 }
 
-/// A key went up: whether its press was consumed (then so is this).
+/// A key went up after `held` ms down: whether its press was consumed
+/// (then so is this); a binding hearing its release fires.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_keyUp(
     _: JNIEnv<'_>,
     _: JClass<'_>,
     handle: jlong,
     code: jint,
+    held: jlong,
 ) -> jboolean {
     // SAFETY: Java passes its live handle.
     let host = unsafe { crate::host::host(handle) };
-    let mut state = host.keymap.lock().unwrap_or_else(|e| e.into_inner());
-    match state.held.iter().position(|held| *held == code) {
-        Some(i) => {
-            state.held.remove(i);
-            JNI_TRUE
-        }
-        None => JNI_FALSE,
+    let action = {
+        let mut state = host.keymap.lock().unwrap_or_else(|e| e.into_inner());
+        state.held.release(code, millis(held))
+    };
+    if let Some(report) = action.report {
+        host.dispatch(ROOT_ID, EventKind::KeyCommand, report);
     }
+    if action.consumed { JNI_TRUE } else { JNI_FALSE }
 }
 
 #[cfg(test)]

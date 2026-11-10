@@ -238,12 +238,17 @@ final class Native {
     /**
      * A hardware key went down: whether the app's shortcuts ({@code nsh/keymap}) take it.
      * {@code unicode}: what it types without modifiers ({@code KeyEvent.getUnicodeChar(0)});
-     * {@code repeat}: an auto-repeat; {@code editing}: a text input or hosted view has the focus.
+     * {@code repeat}: an auto-repeat; {@code editing}: a text input or hosted view has the focus;
+     * {@code held}: milliseconds since the key went down ({@code getEventTime() - getDownTime()}).
      */
-    static native boolean keyDown(long handle, int keyCode, int unicode, int meta, boolean repeat, boolean editing);
+    static native boolean keyDown(long handle, int keyCode, int unicode, int meta, boolean repeat, boolean editing,
+            long held);
 
-    /** A hardware key went up: whether its press was taken (then so is its release). */
-    static native boolean keyUp(long handle, int keyCode);
+    /**
+     * A hardware key went up after {@code held} milliseconds down: whether its press was taken (then
+     * so is its release); a binding that hears releases fires.
+     */
+    static native boolean keyUp(long handle, int keyCode, long held);
 
     /**
      * Mouse event {@code kind} ({@code onMouseEnter}, {@code onMouseMove}, {@code onMouseLeave}) of

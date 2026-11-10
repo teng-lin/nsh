@@ -1332,6 +1332,20 @@ pub struct KeyOptions {
     pub pass_through: bool,
 }
 
+/// A binding of [`on_key_event`] firing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KeyCommand {
+    /// The keystroke as written.
+    pub keystroke: Rc<str>,
+    /// The key went down, auto-repeated ([`KeyOptions::repeat`]) or went
+    /// up.
+    pub phase: crate::keymap::KeyPhase,
+    /// How long the key has been down: zero on the press, the time since
+    /// it went down on an auto-repeat and on the release.
+    pub held: Duration,
+}
+
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
 /// the OS, or for a browser the platform it runs on
 /// ([`crate::keymap::apple_keys`]).
@@ -1374,6 +1388,69 @@ pub fn on_key(keystroke: &str, handler: impl Fn(&str) + 'static) {
 /// As [`on_key`].
 #[track_caller]
 pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) + 'static) {
+    bind_key(keystroke, options, false, move |e| handler(&e.keystroke));
+}
+
+/// [`on_key_with`] whose handler hears each part of the key's press: it
+/// goes down ([`KeyPhase::Press`](crate::keymap::KeyPhase::Press)), its
+/// auto-repeats with `repeat` ([`KeyPhase::Repeat`](crate::keymap::KeyPhase::Repeat)),
+/// and it goes up ([`KeyPhase::Release`](crate::keymap::KeyPhase::Release)),
+/// with how long it has been held ([`KeyCommand::held`]). An app tells a
+/// long press from a short one with it, at a threshold of its own: start a
+/// [`set_timeout`] on the press for the long action, and on the release
+/// run the short one if the timer has not fired (cancel it); this works
+/// for remotes that auto-repeat and for those that do not. A release is
+/// reported once the press fired the binding, even if a text input took
+/// the focus meanwhile; it is consumed as its press was.
+///
+/// ```no_run
+/// # use std::{cell::Cell, time::Duration};
+/// # use nsh_core::{keymap::KeyPhase, prelude::*};
+/// # fn play() {}
+/// # fn show_options() {}
+/// # fn bind() {
+/// let (long, timer) = (signal(false), Cell::new(None));
+/// on_key_event("enter", KeyOptions::default(), move |e| match e.phase {
+///     KeyPhase::Press => {
+///         long.set(false);
+///         let fire = move || {
+///             long.set(true);
+///             show_options();
+///         };
+///         timer.set(Some(set_timeout(Duration::from_millis(600), fire)));
+///     }
+///     KeyPhase::Release => {
+///         if let Some(pending) = timer.take() {
+///             pending.cancel();
+///         }
+///         if !long.get_untracked() {
+///             play();
+///         }
+///     }
+///     _ => {}
+/// });
+/// # }
+/// ```
+///
+/// Android reports releases. Elsewhere the handler hears presses (and
+/// auto-repeats) only, each as a [`KeyPhase::Press`](crate::keymap::KeyPhase::Press):
+/// the other platforms' shortcut tables do not report releases yet.
+///
+/// # Panics
+///
+/// As [`on_key`].
+#[track_caller]
+pub fn on_key_event(keystroke: &str, options: KeyOptions, handler: impl Fn(&KeyCommand) + 'static) {
+    bind_key(keystroke, options, true, handler);
+}
+
+#[track_caller]
+fn bind_key(
+    keystroke: &str,
+    options: KeyOptions,
+    release: bool,
+    handler: impl Fn(&KeyCommand) + 'static,
+) {
     let os = os();
     let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())
         .unwrap_or_else(|e| panic!("on_key: {e}"));
@@ -1381,7 +1458,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         panic!("on_key: {keystroke:?} cannot be bound: {why}");
     }
     let owner = Owner::current();
-    let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
+    let handler: super::keys::KeyHandler = Rc::new(move |k: &KeyCommand| owner.run(|| handler(k)));
     // It belongs to the window whose tree binds it (`current_window`).
     let window = super::use_context::<super::desktop::WindowRef>().and_then(|w| w.dialog_root());
     let keys = executor().keys.clone();
@@ -1389,6 +1466,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         |id| {
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
+                .reporting_releases(release)
         },
         keystroke.into(),
         handler,

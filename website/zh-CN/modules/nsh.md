@@ -2577,10 +2577,10 @@ nsh.send("conversation.open", Map.of("id", "43"));
 
 ## keymap
 
-快捷键 API 绑定应用的键盘快捷键：一个按键组合（如 `"mod+k"`）和它要运行的函数。Rust 代码调用 `nsh_core::prelude` 中的 `on_key`、`on_key_with` 和 `key_label`；TSX 从 `nsh` 导入 `keymap`。两者接受同样的按键组合，遵循同样的规则。
+快捷键 API 绑定应用的键盘快捷键：一个按键组合（如 `"mod+k"`）和它要运行的函数。Rust 代码调用 `nsh_core::prelude` 中的 `on_key`、`on_key_with`、`on_key_event` 和 `key_label`；TSX 从 `nsh` 导入 `keymap`。两者接受同样的按键组合，遵循同样的规则。
 
 ```rust tabs
-use nsh_core::prelude::*; // on_key、on_key_with、KeyOptions、key_label
+use nsh_core::prelude::*; // on_key、on_key_with、on_key_event、KeyOptions、KeyCommand、key_label
 ```
 
 ```tsx tabs
@@ -2792,6 +2792,36 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 
 ```tsx tabs
 keymap.bind("tab", close, { passThrough: true });
+```
+
+### 按下、按住与松开
+
+用 `on_key_event` 绑定的 Rust 快捷键能听到一次按键的每个阶段：处理函数收到一个 `KeyCommand`，其 `phase`（`nsh_core::keymap::KeyPhase`）在按键按下时是 `Press`，每次自动重复时是 `Repeat`（需设置 `repeat: true`），松开时是 `Release`；`held` 是按键已按住的时长。电视应用用它实现遥控器的长按，阈值由应用自己决定：按下时启动一个定时器执行长按动作，松开时如果定时器还没触发就执行短按动作。会自动重复按住的键的遥控器和不会自动重复的遥控器都适用。Android 会报告松开；其他平台上处理函数只听到按下。
+
+```rust
+use std::{cell::Cell, time::Duration};
+use nsh_core::{keymap::KeyPhase, prelude::*};
+
+let (long, timer) = (signal(false), Cell::new(None));
+on_key_event("enter", KeyOptions::default(), move |e| match e.phase {
+    KeyPhase::Press => {
+        long.set(false);
+        let fire = move || {
+            long.set(true);
+            show_options();
+        };
+        timer.set(Some(set_timeout(Duration::from_millis(600), fire)));
+    }
+    KeyPhase::Release => {
+        if let Some(pending) = timer.take() {
+            pending.cancel();
+        }
+        if !long.get_untracked() {
+            play();
+        }
+    }
+    _ => {}
+});
 ```
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。

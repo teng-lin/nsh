@@ -5887,10 +5887,10 @@ impl<M: TextEngine> Core<M> {
             }
             // A view's shortcut runs here; JS's go to JS.
             EventKind::KeyCommand if id == crate::ROOT_ID => {
-                let EventPayload::Value(crate::PayloadValue::Number(binding)) = payload else {
+                let Some(report) = crate::keymap::KeyReport::from_payload(payload) else {
                     return false;
                 };
-                let binding = *binding as u32;
+                let binding = report.id;
                 if binding < crate::element::keys::FIRST_ID {
                     return false;
                 }
@@ -5900,8 +5900,13 @@ impl<M: TextEngine> Core<M> {
                 }
                 let found = self.components.executor.keys.borrow().handler(binding);
                 // A binding removed since the platform matched it.
-                if let Some((text, handler)) = found {
-                    let result = caught(|| handler(&text));
+                if let Some((keystroke, handler)) = found {
+                    let command = crate::element::KeyCommand {
+                        keystroke,
+                        phase: report.phase,
+                        held: report.held,
+                    };
+                    let result = caught(|| handler(&command));
                     self.apply_actions();
                     if let Err(message) = result {
                         log::error!(target: "js", "a keyboard shortcut failed: {message}");

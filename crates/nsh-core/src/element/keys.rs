@@ -10,8 +10,9 @@ use std::rc::Rc;
 
 use crate::keymap::KeyBinding;
 
-/// A view's shortcut handler: it gets the keystroke as written.
-pub(crate) type KeyHandler = Rc<dyn Fn(&str)>;
+/// A view's shortcut handler: it gets the keystroke as written and which
+/// part of the press fired it.
+pub(crate) type KeyHandler = Rc<dyn Fn(&super::KeyCommand)>;
 
 /// The first id of a view's binding.
 pub(crate) const FIRST_ID: u32 = 1 << 31;

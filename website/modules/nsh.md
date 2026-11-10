@@ -2693,10 +2693,10 @@ See [Embedding on iOS](../docs/ios.md#talking-to-the-app), [Embedding on Android
 
 ## keymap
 
-The keymap binds the app's keyboard shortcuts: a keystroke such as `"mod+k"` and the function it runs. Rust code calls `on_key`, `on_key_with` and `key_label` from `nsh_core::prelude`; TSX imports `keymap` from `nsh`. Both take the same keystrokes and follow the same rules.
+The keymap binds the app's keyboard shortcuts: a keystroke such as `"mod+k"` and the function it runs. Rust code calls `on_key`, `on_key_with`, `on_key_event` and `key_label` from `nsh_core::prelude`; TSX imports `keymap` from `nsh`. Both take the same keystrokes and follow the same rules.
 
 ```rust tabs
-use nsh_core::prelude::*; // on_key, on_key_with, KeyOptions, key_label
+use nsh_core::prelude::*; // on_key, on_key_with, on_key_event, KeyOptions, KeyCommand, key_label
 ```
 
 ```tsx tabs
@@ -2908,6 +2908,36 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 
 ```tsx tabs
 keymap.bind("tab", close, { passThrough: true });
+```
+
+### Press, hold and release
+
+A Rust binding made with `on_key_event` hears each part of a key's press: its handler gets a `KeyCommand` whose `phase` (`nsh_core::keymap::KeyPhase`) is `Press` when the key goes down, `Repeat` on each auto-repeat (with `repeat: true`) and `Release` when it goes up, and whose `held` is how long the key has been down. A TV app uses it for a remote's long press, at a threshold of its own: a timer started on the press runs the long action, and the release runs the short one if the timer has not fired yet. This works for remotes that auto-repeat a held key and for those that do not. Android reports releases; on the other platforms the handler hears the presses.
+
+```rust
+use std::{cell::Cell, time::Duration};
+use nsh_core::{keymap::KeyPhase, prelude::*};
+
+let (long, timer) = (signal(false), Cell::new(None));
+on_key_event("enter", KeyOptions::default(), move |e| match e.phase {
+    KeyPhase::Press => {
+        long.set(false);
+        let fire = move || {
+            long.set(true);
+            show_options();
+        };
+        timer.set(Some(set_timeout(Duration::from_millis(600), fire)));
+    }
+    KeyPhase::Release => {
+        if let Some(pending) = timer.take() {
+            pending.cancel();
+        }
+        if !long.get_untracked() {
+            play();
+        }
+    }
+    _ => {}
+});
 ```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.
