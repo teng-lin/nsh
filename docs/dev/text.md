@@ -10,7 +10,9 @@
   On iOS and macOS, a positive fixed-height box keeps its first line even when that line is taller than the box
   (Dynamic Type on iOS; on both, a box a fraction of a point shorter than the line's measured height).
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
-  excess. Empty and zero-height boxes stay empty.
+  excess. Empty and zero-height boxes stay empty. On macOS a `clip` line wider than its box starts at its
+  paragraph's start edge whatever the alignment, the right for right-to-left text (the writing direction, else
+  the first strong character's, as CoreText's natural direction), so the beginning stays in view as on Linux.
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
   Final layouts are hit-tested by their engine too, in the content box (`TextEngine::hit_test`,
   `caret_rect`, `range_rects`): the caret position nearest a point (`TextPosition`: a UTF-16 offset and its

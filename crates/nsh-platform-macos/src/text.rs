@@ -341,6 +341,11 @@ pub struct Prepared {
     max_lines: u32,
     ellipsize: EllipsizeMode,
     align: TextAlign,
+    /// The layout's direction (`AttributedText::rtl`).
+    rtl: bool,
+    /// `writingDirection` (`AttributedText::writing_direction`): right to
+    /// left or not; `None`: natural, from the content.
+    writing_direction: Option<bool>,
     /// Attachments: placeholder offset (UTF-16) and how far its top is
     /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
@@ -374,6 +379,8 @@ pub(crate) struct CoreTextLayout {
     max_lines: u32,
     ellipsize: EllipsizeMode,
     align: TextAlign,
+    rtl: bool,
+    writing_direction: Option<bool>,
     placeholders: Vec<(CFIndex, CGFloat)>,
     size: Size<Points>,
 }
@@ -391,6 +398,8 @@ impl std::ops::Deref for CoreTextLayout {
                 max_lines: self.max_lines,
                 ellipsize: self.ellipsize,
                 align: self.align,
+                rtl: self.rtl,
+                writing_direction: self.writing_direction,
                 attachments: self.placeholders.clone(),
             };
             lay_out(&prepared, self.size)
@@ -912,11 +921,48 @@ impl Prepared {
         }
     }
 
-    fn flush_factor(&self) -> CGFloat {
+    /// Where a line of a paragraph running right to left (`rtl`) or not
+    /// sits in the box, as [`paragraph_key`]'s alignment puts the others:
+    /// natural alignment (and a justified paragraph's last line) is the
+    /// paragraph's start side.
+    fn flush_factor(&self, rtl: bool) -> CGFloat {
         match self.align {
             TextAlign::Center => 0.5,
             TextAlign::Right => 1.0,
-            TextAlign::Auto | TextAlign::Left | TextAlign::Justify => 0.0,
+            TextAlign::Left => 0.0,
+            TextAlign::Auto if self.rtl || rtl => 1.0,
+            TextAlign::Justify if rtl => 1.0,
+            TextAlign::Auto | TextAlign::Justify => 0.0,
+        }
+    }
+
+    /// Whether the paragraph holding `at` (UTF-16) runs right to left, as
+    /// CoreText resolves it: the writing direction, else its first strong
+    /// character's (UAX #9 P2-P3, a natural writing direction), else the
+    /// layout's.
+    fn paragraph_rtl(&self, at: CFIndex) -> bool {
+        if let Some(rtl) = self.writing_direction {
+            return rtl;
+        }
+        let s = self
+            .string
+            .string()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let (mut units, mut from) = (0, 0);
+        for (i, c) in s.char_indices() {
+            if units >= at {
+                break;
+            }
+            units += c.len_utf16() as CFIndex;
+            if unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::B {
+                from = i + c.len_utf8();
+            }
+        }
+        match unicode_bidi::get_base_direction(&s[from..]) {
+            unicode_bidi::Direction::Rtl => true,
+            unicode_bidi::Direction::Ltr => false,
+            unicode_bidi::Direction::Mixed => self.rtl,
         }
     }
 }
@@ -945,6 +991,8 @@ impl TextEngine for CoreTextEngine {
             max_lines: text.max_lines,
             ellipsize: text.ellipsize,
             align: text.align,
+            rtl: text.rtl,
+            writing_direction: text.writing_direction,
             attachments: text
                 .attachments
                 .iter()
@@ -1004,6 +1052,8 @@ impl TextEngine for CoreTextEngine {
             max_lines: prepared.max_lines,
             ellipsize: prepared.ellipsize,
             align: prepared.align,
+            rtl: prepared.rtl,
+            writing_direction: prepared.writing_direction,
             placeholders: prepared.attachments.clone(),
             size,
         };
@@ -1233,11 +1283,27 @@ fn lay_out(prepared: &Prepared, size: Size<Points>) -> LaidLines {
         if range.location + range.length < prepared.length
             && let Some(truncated) = prepared.truncate(range.location, width)
         {
-            // SAFETY: a valid line.
-            let x = unsafe { truncated.pen_offset_for_flush(prepared.flush_factor(), width) };
-            // A clipped line wider than the box starts at its start edge
-            // and overflows the end (CSS), centered or not.
-            last.origin.x = x.max(0.0);
+            let rtl = prepared.paragraph_rtl(range.location);
+            // SAFETY: a valid line and null out-params.
+            let (x, line_width) = unsafe {
+                (
+                    truncated.pen_offset_for_flush(prepared.flush_factor(rtl), width),
+                    truncated.typographic_bounds(
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    ),
+                )
+            };
+            // A clipped line wider than the box starts at its paragraph's
+            // start edge and overflows the end (CSS), whatever the
+            // alignment: the right one for right-to-left text, so its
+            // beginning stays in view there too.
+            last.origin.x = match line_width > width {
+                true if rtl => width - line_width,
+                true => 0.0,
+                false => x.max(0.0),
+            };
             last.line = truncated;
             last.hit_end = prepared.length;
             last.break_len = 0;
@@ -3104,6 +3170,70 @@ mod hit_regressions {
             assert_eq!(line.hit_end, prepared.length, "{mode:?}: ellipsized");
             let zero = engine.layout(&prepared, Size::new(Points(100.0), Points(0.0)));
             assert!(engine.lines(&zero).is_empty());
+        }
+    }
+
+    #[test]
+    fn cut_line_keeps_the_start_of_its_paragraph() {
+        // A clipped line wider than its box starts at its paragraph's start
+        // edge whatever the alignment: the left for left-to-right text, the
+        // right for right-to-left text (from its first strong character, as
+        // CoreText's natural direction), so the beginning of the text stays
+        // in view. An ellipsized line, which fits, is aligned as the
+        // paragraph's other lines are: natural alignment is that start edge.
+        let engine = CoreTextEngine::default();
+        let width = 120.0;
+        let cases = [
+            ("Programme of the evening, live", None, false),
+            ("برنامج المساء التجريبي الطويل", None, true),
+            // A leading number does not make the paragraph left to right.
+            ("5 برنامج المساء التجريبي الطويل", None, true),
+            ("תוכנית בדיקה ארוכה מאוד 4", None, true),
+            // An explicit writing direction wins over the content.
+            ("برنامج المساء التجريبي الطويل", Some(false), false),
+            ("Programme of the evening, live", Some(true), true),
+        ];
+        for (s, direction, rtl) in cases {
+            for mode in [EllipsizeMode::Clip, EllipsizeMode::Tail] {
+                for align in [TextAlign::Auto, TextAlign::Center] {
+                    let mut text = AttributedText {
+                        max_lines: 1,
+                        ellipsize: mode,
+                        align,
+                        writing_direction: direction,
+                        ..Default::default()
+                    };
+                    text.push(
+                        s,
+                        ResolvedTextStyle {
+                            font_size: Points(26.0),
+                            ..Default::default()
+                        },
+                    );
+                    let prepared = engine.prepare(&text);
+                    let laid = engine.layout(&prepared, Size::new(Points(width), Points(40.0)));
+                    let lines = engine.lines(&laid);
+                    assert_eq!(lines.len(), 1, "{s} {mode:?} {align:?}");
+                    let line = &lines[0];
+                    let (left, right) = (line.x.0, line.x.0 + line.width.0);
+                    let what = format!("{s} {direction:?} {mode:?} {align:?}: {left}..{right}");
+                    if mode == EllipsizeMode::Clip {
+                        assert!(line.width.0 > width, "{what}: wider than its box");
+                    } else {
+                        assert!(line.width.0 <= width + 0.5, "{what}: fits its box");
+                    }
+                    if mode == EllipsizeMode::Tail && align == TextAlign::Center {
+                        assert!(
+                            ((left + right) / 2.0 - width / 2.0).abs() < 0.5,
+                            "{what}: centered"
+                        );
+                    } else if rtl {
+                        assert!((right - width).abs() < 0.5, "{what}: flush right");
+                    } else {
+                        assert!(left.abs() < 0.5, "{what}: flush left");
+                    }
+                }
+            }
         }
     }
 

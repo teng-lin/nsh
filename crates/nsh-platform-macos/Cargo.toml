@@ -73,6 +73,7 @@ objc2-io-kit.workspace = true
 objc2-io-surface.workspace = true
 objc2-quartz-core.workspace = true
 rustc-hash.workspace = true
+unicode-bidi.workspace = true
 serde_json.workspace = true
 libc.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
