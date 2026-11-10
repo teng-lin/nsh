@@ -117,7 +117,11 @@ public class NshView extends FrameLayout {
     public boolean dispatchKeyEvent(android.view.KeyEvent e) {
         if (handle != 0) {
             int action = e.getAction();
-            if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+            if (action == android.view.KeyEvent.ACTION_DOWN && e.getKeyCode() == preImeCode
+                    && e.getDownTime() == preImeDown && e.getEventTime() == preImeTime) {
+                // The keymap heard this press before the input method (dispatchKeyEventPreIme) and let it go on.
+                preImeCode = 0;
+            } else if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
                 return true;
             } else if (action == android.view.KeyEvent.ACTION_UP
                     && Native.keyUp(handle, e.getKeyCode(), e.getEventTime() - e.getDownTime())) {
@@ -125,6 +129,61 @@ public class NshView extends FrameLayout {
             }
         }
         return super.dispatchKeyEvent(e);
+    }
+
+    /**
+     * The press the keymap heard in {@link #dispatchKeyEventPreIme} and did not consume, by its key code
+     * (0: none) and times: key events are pooled, so not by the object.
+     */
+    private int preImeCode;
+    private long preImeDown;
+    private long preImeTime;
+
+    /**
+     * In touch mode, the window consumes the first navigation key (a D-pad's arrows and centre, Tab,
+     * Space, Enter, Page Up / Down, Home, End) to leave touch mode, after the input method and before
+     * {@link #dispatchKeyEvent} (ViewRootImpl's {@code checkForLeavingTouchModeAndConsume}): a TV remote's
+     * first press after a touch would do nothing. With no text input or hosted view focused, the keymap
+     * hears such a press here first; one it takes leaves touch mode as the window would, so the next keys
+     * come the usual way. A press it does not take goes on as before (and is not matched again).
+     */
+    @Override
+    public boolean dispatchKeyEventPreIme(android.view.KeyEvent e) {
+        if (handle != 0 && e.getAction() == android.view.KeyEvent.ACTION_DOWN && isInTouchMode()
+                && navigationKey(e.getKeyCode())) {
+            View focus = findFocus();
+            if (focus == null || focus == this) {
+                if (keymapKey(e)) {
+                    requestFocusFromTouch();
+                    return true;
+                }
+                preImeCode = e.getKeyCode();
+                preImeDown = e.getDownTime();
+                preImeTime = e.getEventTime();
+            }
+        }
+        return super.dispatchKeyEventPreIme(e);
+    }
+
+    /** The keys ViewRootImpl counts as navigation ({@code isNavigationKey}). */
+    private static boolean navigationKey(int code) {
+        switch (code) {
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT:
+            case android.view.KeyEvent.KEYCODE_DPAD_UP:
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+            case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+            case android.view.KeyEvent.KEYCODE_PAGE_UP:
+            case android.view.KeyEvent.KEYCODE_PAGE_DOWN:
+            case android.view.KeyEvent.KEYCODE_MOVE_HOME:
+            case android.view.KeyEvent.KEYCODE_MOVE_END:
+            case android.view.KeyEvent.KEYCODE_TAB:
+            case android.view.KeyEvent.KEYCODE_SPACE:
+            case android.view.KeyEvent.KEYCODE_ENTER:
+                return true;
+            default:
+                return false;
+        }
     }
 
     /**
