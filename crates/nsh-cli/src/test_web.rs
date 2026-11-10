@@ -206,6 +206,8 @@ fn dom_key(key: nsh_core::keymap::Key, shift: bool) -> Option<(String, String)> 
         Key::Guide => named("Guide", ""),
         Key::Info => named("Info", ""),
         Key::Menu => named("ContextMenu", "ContextMenu"),
+        // Back (a TV remote's, Android's): the browser's own Back key.
+        Key::Back => named("BrowserBack", "BrowserBack"),
         Key::ColorRed => named("ColorF0Red", ""),
         Key::ColorGreen => named("ColorF1Green", ""),
         Key::ColorYellow => named("ColorF2Yellow", ""),
@@ -625,5 +627,26 @@ impl Native for WebNative {
 
     fn quit(&self) {
         self.page.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::keymap::Key;
+
+    use super::dom_key;
+
+    #[test]
+    fn remote_keys_have_dom_names() {
+        let names = |key| dom_key(key, false);
+        assert_eq!(
+            names(Key::Back),
+            Some(("BrowserBack".to_owned(), "BrowserBack".to_owned()))
+        );
+        assert_eq!(names(Key::Guide), Some(("Guide".to_owned(), String::new())));
+        assert_eq!(
+            names(Key::Char('a')),
+            Some(("a".to_owned(), "KeyA".to_owned()))
+        );
     }
 }
