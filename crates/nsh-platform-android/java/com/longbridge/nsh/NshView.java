@@ -121,9 +121,10 @@ public class NshView extends FrameLayout {
             // the platform does (onBackKey, the activity, the back callback).
             int action = e.getAction();
             if (action == android.view.KeyEvent.ACTION_DOWN) {
+                if (e.getRepeatCount() == 0) backPressedAt = e.getDownTime();
                 keymapKey(e);
             } else if (action == android.view.KeyEvent.ACTION_UP) {
-                Native.keyUp(handle, e.getKeyCode(), e.getEventTime() - e.getDownTime());
+                releaseBackKey(e.getEventTime());
             }
             return super.dispatchKeyEvent(e);
         }
@@ -1052,7 +1053,22 @@ public class NshView extends FrameLayout {
      */
     public boolean handleBack() {
         if (exiting || handle == 0) return false;
+        // With an OnBackInvokedCallback in effect the window turns the back
+        // key's release into this call instead of a key event: the bindings
+        // hear the release here, before the press goes back.
+        releaseBackKey(android.os.SystemClock.uptimeMillis());
         return mounter.handleBack();
+    }
+
+    /** When the back key went down, as the bindings heard it (0: not down). */
+    private long backPressedAt;
+
+    /** The back key went up at {@code at} (uptime ms): its bindings hear it, once. */
+    private void releaseBackKey(long at) {
+        if (backPressedAt == 0 || handle == 0) return;
+        long held = Math.max(0, at - backPressedAt);
+        backPressedAt = 0;
+        Native.keyUp(handle, android.view.KeyEvent.KEYCODE_BACK, held);
     }
 
     /** The back key's press went to the app (its release does too). */
