@@ -115,6 +115,9 @@ pub(crate) struct AppConfig {
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde_json::Value>,
+    /// A Rust app's platform features (`rust_app::PLATFORM_FEATURES`).
+    #[serde(default, rename = "features")]
+    _features: Option<serde_json::Value>,
     /// What the web's packages add to the page (`web.rs`).
     #[serde(default)]
     pub(crate) web: WebConfig,
@@ -1709,6 +1712,14 @@ mod tests {
                 "unknown key `web.futureWebKey`",
             ]
         );
+    }
+
+    #[test]
+    fn nsh_json_knows_a_rust_apps_keys() {
+        let (_, unknown) =
+            parse_config(r#"{ "name": "Tv", "rust": ".", "root": "App", "features": ["shader"] }"#)
+                .unwrap();
+        assert!(unknown.is_empty(), "{unknown:?}");
     }
 
     #[test]
