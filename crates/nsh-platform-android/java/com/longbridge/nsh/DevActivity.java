@@ -119,9 +119,14 @@ public final class DevActivity extends Activity {
         systemBars(this);
     }
 
-    /** Draw behind the system bars: the app gets them as `safeArea()`. */
+    /**
+     * Draws {@code activity} behind the system bars: the app gets them as {@code safeArea()}. A host
+     * activity of its own calls it in {@code onCreate}, before it sets its content, as nsh's do.
+     *
+     * @param activity the activity showing an {@link NshView}
+     */
     @SuppressWarnings("deprecation")
-    static void edgeToEdge(Activity activity) {
+    public static void edgeToEdge(Activity activity) {
         if (Build.VERSION.SDK_INT >= 30) {
             activity.getWindow().setDecorFitsSystemWindows(false);
         } else {
@@ -135,9 +140,14 @@ public final class DevActivity extends Activity {
         systemBars(activity);
     }
 
-    /** Dark system bar icons in light mode, light ones in dark mode. */
+    /**
+     * Dark system bar icons in light mode, light ones in dark mode. A host activity of its own calls it
+     * again in {@code onConfigurationChanged} ({@link #edgeToEdge} calls it once).
+     *
+     * @param activity the activity showing an {@link NshView}
+     */
     @SuppressWarnings("deprecation")
-    static void systemBars(Activity activity) {
+    public static void systemBars(Activity activity) {
         int night = activity.getResources().getConfiguration().uiMode
                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
         boolean dark = night == android.content.res.Configuration.UI_MODE_NIGHT_YES;

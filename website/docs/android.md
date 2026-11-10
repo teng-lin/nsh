@@ -432,7 +432,11 @@ config of the app may override it). The release `nsh.aar` does not.
   or use `adjustResize`; with `adjustPan` the system moves the whole window instead.
 - **Safe area.** The view reports as insets only the parts of the system bars and the keyboard that overlap it, so an
   `NshView` below a toolbar gets no top inset. For edge-to-edge content, draw behind the system bars and let the app use
-  `env(safe-area-inset-*)` padding / `safeAreaInsets()` (`safe_area()` in Rust).
+  `env(safe-area-inset-*)` padding / `safeAreaInsets()` (`safe_area()` in Rust). Packaged NSH apps do it with
+  `DevActivity.edgeToEdge(activity)` in `onCreate`, before setting the content, and `DevActivity.systemBars(activity)`
+  in `onConfigurationChanged` (system bar icons that follow light and dark mode); a host activity of its own calls the
+  same. One that runs an app on its own, as a packaged app runs, calls `nshView.useStandaloneLimits()` before loading
+  it: the app then runs without the [embedding limits](#limits).
 - **Configuration changes.** An activity recreated on rotation or a theme change destroys the view, and the app starts
   again from scratch. To keep it running, declare the changes the activity handles itself; packaged NSH apps use:
 

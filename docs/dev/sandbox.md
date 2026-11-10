@@ -112,7 +112,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
   budgets, node quota; unset / 0 keeps a default; both through `HostLimits`, as `--limits` is), from the next load;
   on macOS, Windows, Linux and GPUI `AppOptions::limits` / `AppView::set_limits` (a whole `Limits`), likewise from
-  the next load. nsh's own Android activities run apps on their own (`NshView.useStandaloneLimits`, package-private).
+  the next load. nsh's own Android activities run apps on their own (`NshView.useStandaloneLimits`, public for a standalone app's own host activity).
 
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).

@@ -313,8 +313,12 @@ public class NshView extends FrameLayout {
         Native.setLimits(handle, memoryMb, stackKb, loadMs, callMs, maxNodes);
     }
 
-    /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
-    void useStandaloneLimits() {
+    /**
+     * Runs the apps loaded from now on as apps on their own, without the embedding limits
+     * ({@link #setLimits}): nsh's own activities do, and so does a host activity of the app's own that
+     * runs it as a standalone app.
+     */
+    public void useStandaloneLimits() {
         Native.setStandaloneLimits(handle);
     }
 
