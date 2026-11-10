@@ -95,6 +95,11 @@ pub enum Key {
     ChannelDown,
     /// A TV remote's Guide (the programme guide).
     Guide,
+    /// Back: a TV remote's or Android's (Android only). Bindings hear its
+    /// press, repeats and release (to tell a long press), but never take
+    /// it: the press still goes back as the platform does
+    /// (`on_back_press` and the system).
+    Back,
     /// A TV remote's Info.
     Info,
     /// Menu: a TV remote's, or a PC keyboard's context menu key
@@ -209,6 +214,7 @@ impl Key {
             | Key::ChannelUp
             | Key::ChannelDown
             | Key::Guide
+            | Key::Back
             | Key::Info
             | Key::ColorRed
             | Key::ColorGreen
@@ -295,6 +301,7 @@ impl Key {
             | Key::ChannelUp
             | Key::ChannelDown
             | Key::Guide
+            | Key::Back
             | Key::Info
             | Key::ColorRed
             | Key::ColorGreen
@@ -422,6 +429,7 @@ const ANDROID_NAMED: &[(i32, Key)] = &[
     (166, Key::ChannelUp),
     (167, Key::ChannelDown),
     (172, Key::Guide),
+    (4, Key::Back),
     (183, Key::ColorRed),
     (184, Key::ColorGreen),
     (185, Key::ColorYellow),
@@ -523,6 +531,7 @@ const NAMED: &[(&str, Key)] = &[
     ("channelup", Key::ChannelUp),
     ("channeldown", Key::ChannelDown),
     ("guide", Key::Guide),
+    ("back", Key::Back),
     ("info", Key::Info),
     ("menu", Key::Menu),
     ("contextmenu", Key::Menu),
@@ -638,6 +647,7 @@ impl Keystroke {
             | Key::ChannelUp
             | Key::ChannelDown
             | Key::Guide
+            | Key::Back
             | Key::Info
             | Key::ColorRed
             | Key::ColorGreen
@@ -845,6 +855,7 @@ impl Keystroke {
             Key::ChannelUp => s.push_str("CH+"),
             Key::ChannelDown => s.push_str("CH-"),
             Key::Guide => s.push_str("Guide"),
+            Key::Back => s.push_str("Back"),
             Key::Info => s.push_str("Info"),
             Key::Menu => s.push_str("Menu"),
             Key::ColorRed => s.push_str("Red"),
@@ -1386,6 +1397,7 @@ mod tests {
         (Key::ChannelUp, 166, "channelup"),
         (Key::ChannelDown, 167, "channeldown"),
         (Key::Guide, 172, "guide"),
+        (Key::Back, 4, "back"),
         (Key::Info, 165, "info"),
         (Key::Menu, 82, "menu"),
         (Key::ColorRed, 183, "red"),

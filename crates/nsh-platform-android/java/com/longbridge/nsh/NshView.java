@@ -115,6 +115,18 @@ public class NshView extends FrameLayout {
      */
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (handle != 0 && e.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
+            // Back: the app's bindings hear its press, repeats and release
+            // (to tell a long press), but never take it, so it goes back as
+            // the platform does (onBackKey, the activity, the back callback).
+            int action = e.getAction();
+            if (action == android.view.KeyEvent.ACTION_DOWN) {
+                keymapKey(e);
+            } else if (action == android.view.KeyEvent.ACTION_UP) {
+                Native.keyUp(handle, e.getKeyCode(), e.getEventTime() - e.getDownTime());
+            }
+            return super.dispatchKeyEvent(e);
+        }
         if (handle != 0) {
             int action = e.getAction();
             if (action == android.view.KeyEvent.ACTION_DOWN && e.getKeyCode() == preImeCode

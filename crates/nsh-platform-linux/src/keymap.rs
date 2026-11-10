@@ -326,7 +326,7 @@ fn trigger(
         Key::ColorYellow => "XF86Yellow".to_owned(),
         Key::ColorBlue => "XF86Blue".to_owned(),
         // X has no keysym of their own (XF86AudioPlay is Play/Pause's).
-        Key::MediaPlay | Key::ChannelUp | Key::ChannelDown | Key::Guide | Key::Info => {
+        Key::MediaPlay | Key::ChannelUp | Key::ChannelDown | Key::Guide | Key::Back | Key::Info => {
             return None;
         }
     };
