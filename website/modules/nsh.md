@@ -2828,7 +2828,23 @@ iOS follows macOS (`mod` is Command) and Android follows Windows and Linux (`mod
 
 Use `mod` for an app's own shortcuts: it is the key each platform's apps use for them (⌘K on macOS, Ctrl+K on Windows and Linux), so one spelling fits everywhere. The Windows key and Super mostly belong to the system, so `cmd` is rarely right outside macOS.
 
-The key is a letter, digit or punctuation key, written as the character it types on a US keyboard without Shift (`k`, `1`, `,`, `/`, `[`; `"shift+/"` for `?`, `"shift+k"` for Shift+K), or a name: `plus` (the `=` / `+` key, also written `=`), `minus` (also `-`), `space`, `enter` (`return`), `escape` (`esc`), `tab`, `backspace`, `delete` (`del`), `insert`, the arrows `up`, `down`, `left`, `right` (`arrowup`, …), `home`, `end`, `pageup`, `pagedown`, `f1` to `f24`. Case does not matter: `"Mod+Shift+K"` is `"mod+shift+k"`, and a capital letter is the same key, not Shift (`"mod+K"` is `"mod+k"`). Lowercase is the recommended style, which these pages use. `"mod-k"` and `"mod++"` are errors whose messages give the right spelling. Menu shortcuts in `nsh/desktop` take the same keystrokes.
+The key is a letter, digit or punctuation key, written as the character it types on a US keyboard without Shift (`k`, `1`, `,`, `/`, `[`; `"shift+/"` for `?`, `"shift+k"` for Shift+K), or a name: `plus` (the `=` / `+` key, also written `=`), `minus` (also `-`), `space`, `enter` (`return`), `escape` (`esc`), `tab`, `backspace`, `delete` (`del`), `insert`, the arrows `up`, `down`, `left`, `right` (`arrowup`, …), `home`, `end`, `pageup`, `pagedown`, `f1` to `f24`, and the media and TV remote keys below. Case does not matter: `"Mod+Shift+K"` is `"mod+shift+k"`, and a capital letter is the same key, not Shift (`"mod+K"` is `"mod+k"`). Lowercase is the recommended style, which these pages use. `"mod-k"` and `"mod++"` are errors whose messages give the right spelling. Menu shortcuts in `nsh/desktop` take the same keystrokes.
+
+Media and TV remote keys have names too. A TV remote on Android TV sends them all (its OK button and a gamepad's A are `enter`, its D-pad the arrows); the media keys of a Windows or Linux keyboard send the ones the table marks, and its context menu key is `menu`. Volume and mute stay the system's.
+
+| Key | Name (also) | Desktop keyboards |
+|---|---|---|
+| Play/Pause | `playpause` (`mediaplaypause`) | Windows, Linux |
+| Play | `play` (`mediaplay`) | Windows |
+| Pause | `pause` (`mediapause`) | Linux |
+| Stop | `stop` (`mediastop`) | Windows, Linux |
+| Rewind, Fast forward | `rewind` (`mediarewind`), `fastforward` (`mediafastforward`) | Linux |
+| Record | `record` (`mediarecord`) | Linux |
+| Next, Previous | `next` (`mediatracknext`), `previous` (`mediatrackprevious`) | Windows, Linux |
+| Channel up, Channel down | `channelup`, `channeldown` | |
+| Guide, Info | `guide`, `info` | |
+| Menu | `menu` (`contextmenu`) | Windows, Linux |
+| Colour keys | `red`, `green`, `yellow`, `blue` (`colorf0red`, …) | Linux |
 
 Shortcuts work with any keyboard layout: on a Cyrillic or Greek layout, `mod+k` is the key that types K on a US layout, as menu shortcuts are.
 
@@ -2842,7 +2858,7 @@ Shortcuts work with any keyboard layout: on a Cyrillic or Greek layout, `mod+k` 
 
 ### While typing
 
-A text input with the keyboard focus needs its keys: typing, moving the caret, deleting, and select all, cut, copy, paste, undo and redo. So by default a binding does not fire while a text input (or a web view) has the focus if its keystroke is one of these: plain keys and keys with only Shift or Option, the arrows, Home, End, Page Up / Down, Return, Tab, Escape, Backspace, Delete, and `mod+a`, `mod+c`, `mod+v`, `mod+x`, `mod+z`. Other keystrokes with Command or Control, and the function keys, fire wherever the focus is.
+A text input with the keyboard focus needs its keys: typing, moving the caret, deleting, and select all, cut, copy, paste, undo and redo. So by default a binding does not fire while a text input (or a web view) has the focus if its keystroke is one of these: plain keys and keys with only Shift or Option, the arrows, Home, End, Page Up / Down, Return, Tab, Escape, Backspace, Delete, Menu, and `mod+a`, `mod+c`, `mod+v`, `mod+x`, `mod+z`. Other keystrokes with Command or Control, the function keys and the media and TV remote keys fire wherever the focus is.
 
 `when` changes that (Rust: `KeyOptions { when: When::Always, .. }`):
 

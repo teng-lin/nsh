@@ -2712,7 +2712,23 @@ iOS 与 macOS 一致（`mod` 是 Command），Android 与 Windows、Linux 一致
 
 应用自己的快捷键请用 `mod`：它就是各平台应用习惯使用的那个键（macOS 上是 ⌘K，Windows 和 Linux 上是 Ctrl+K），一种写法到处适用。Windows 键和 Super 基本归系统使用，所以在 macOS 以外很少该用 `cmd`。
 
-键可以是字母、数字或标点键，写作它在美式键盘上不按 Shift 时输入的字符（`k`、`1`、`,`、`/`、`[`；`?` 写作 `"shift+/"`，Shift+K 写作 `"shift+k"`），也可以是名称：`plus`（`=` / `+` 键，也可写 `=`）、`minus`（也可写 `-`）、`space`、`enter`（`return`）、`escape`（`esc`）、`tab`、`backspace`、`delete`（`del`）、`insert`、方向键 `up`、`down`、`left`、`right`（`arrowup` 等）、`home`、`end`、`pageup`、`pagedown`、`f1` 到 `f24`。大小写不影响：`"Mod+Shift+K"` 就是 `"mod+shift+k"`，大写字母表示同一个键，并不意味着 Shift（`"mod+K"` 就是 `"mod+k"`）。推荐的写法是全小写，本页示例都这样写。`"mod-k"` 和 `"mod++"` 会报错，错误信息给出正确的写法。`nsh/desktop` 的菜单快捷键使用同样的写法。
+键可以是字母、数字或标点键，写作它在美式键盘上不按 Shift 时输入的字符（`k`、`1`、`,`、`/`、`[`；`?` 写作 `"shift+/"`，Shift+K 写作 `"shift+k"`），也可以是名称：`plus`（`=` / `+` 键，也可写 `=`）、`minus`（也可写 `-`）、`space`、`enter`（`return`）、`escape`（`esc`）、`tab`、`backspace`、`delete`（`del`）、`insert`、方向键 `up`、`down`、`left`、`right`（`arrowup` 等）、`home`、`end`、`pageup`、`pagedown`、`f1` 到 `f24`，以及下面的媒体键和电视遥控器按键。大小写不影响：`"Mod+Shift+K"` 就是 `"mod+shift+k"`，大写字母表示同一个键，并不意味着 Shift（`"mod+K"` 就是 `"mod+k"`）。推荐的写法是全小写，本页示例都这样写。`"mod-k"` 和 `"mod++"` 会报错，错误信息给出正确的写法。`nsh/desktop` 的菜单快捷键使用同样的写法。
+
+媒体键和电视遥控器按键也有名称。Android TV 的遥控器会发送全部这些按键（确认键和手柄的 A 键是 `enter`，方向键是方向键）；Windows 和 Linux 键盘的媒体键发送表中标出的那些，键盘上的菜单键是 `menu`。音量和静音键留给系统。
+
+| 按键 | 名称（别名） | 桌面键盘 |
+|---|---|---|
+| 播放/暂停 | `playpause`（`mediaplaypause`） | Windows、Linux |
+| 播放 | `play`（`mediaplay`） | Windows |
+| 暂停 | `pause`（`mediapause`） | Linux |
+| 停止 | `stop`（`mediastop`） | Windows、Linux |
+| 快退、快进 | `rewind`（`mediarewind`）、`fastforward`（`mediafastforward`） | Linux |
+| 录制 | `record`（`mediarecord`） | Linux |
+| 下一个、上一个 | `next`（`mediatracknext`）、`previous`（`mediatrackprevious`） | Windows、Linux |
+| 频道加、频道减 | `channelup`、`channeldown` | |
+| 节目指南、信息 | `guide`、`info` | |
+| 菜单 | `menu`（`contextmenu`） | Windows、Linux |
+| 彩色键 | `red`、`green`、`yellow`、`blue`（`colorf0red` 等） | Linux |
 
 快捷键适用于任何键盘布局：在西里尔或希腊字母布局下，`mod+k` 是美式布局中输入 K 的那个键，与菜单快捷键一致。
 
@@ -2726,7 +2742,7 @@ iOS 与 macOS 一致（`mod` 是 Command），Android 与 Windows、Linux 一致
 
 ### 输入时
 
-拥有键盘焦点的文本输入框需要它自己的按键：输入、移动光标、删除，以及全选、剪切、复制、粘贴、撤销和重做。因此默认情况下，当文本输入框（或网页视图）拥有焦点时，按键组合属于这些的绑定不会触发：普通键、只带 Shift 或 Option 的键、方向键、Home、End、Page Up / Down、Return、Tab、Escape、Backspace、Delete，以及 `mod+a`、`mod+c`、`mod+v`、`mod+x`、`mod+z`。其他带 Command 或 Control 的按键组合，以及功能键，无论焦点在哪里都会触发。
+拥有键盘焦点的文本输入框需要它自己的按键：输入、移动光标、删除，以及全选、剪切、复制、粘贴、撤销和重做。因此默认情况下，当文本输入框（或网页视图）拥有焦点时，按键组合属于这些的绑定不会触发：普通键、只带 Shift 或 Option 的键、方向键、Home、End、Page Up / Down、Return、Tab、Escape、Backspace、Delete、Menu，以及 `mod+a`、`mod+c`、`mod+v`、`mod+x`、`mod+z`。其他带 Command 或 Control 的按键组合、功能键以及媒体键和电视遥控器按键，无论焦点在哪里都会触发。
 
 `when` 可以改变这一点（Rust：`KeyOptions { when: When::Always, .. }`）：
 

@@ -312,6 +312,23 @@ fn trigger(
         Key::PageUp => "Page_Up".to_owned(),
         Key::PageDown => "Page_Down".to_owned(),
         Key::F(n) => format!("F{n}"),
+        Key::MediaPlayPause => "XF86AudioPlay".to_owned(),
+        Key::MediaPause => "XF86AudioPause".to_owned(),
+        Key::MediaStop => "XF86AudioStop".to_owned(),
+        Key::MediaRewind => "XF86AudioRewind".to_owned(),
+        Key::MediaFastForward => "XF86AudioForward".to_owned(),
+        Key::MediaRecord => "XF86AudioRecord".to_owned(),
+        Key::MediaNext => "XF86AudioNext".to_owned(),
+        Key::MediaPrevious => "XF86AudioPrev".to_owned(),
+        Key::Menu => "Menu".to_owned(),
+        Key::ColorRed => "XF86Red".to_owned(),
+        Key::ColorGreen => "XF86Green".to_owned(),
+        Key::ColorYellow => "XF86Yellow".to_owned(),
+        Key::ColorBlue => "XF86Blue".to_owned(),
+        // X has no keysym of their own (XF86AudioPlay is Play/Pause's).
+        Key::MediaPlay | Key::ChannelUp | Key::ChannelDown | Key::Guide | Key::Info => {
+            return None;
+        }
     };
     let letter = matches!(keystroke.key, Key::Char(c) if c.is_ascii_alphabetic());
     let name = match gtk::gdk::Key::from_name(&name) {
@@ -349,5 +366,30 @@ mod tests {
         assert_eq!(t("mod+shift+1"), "<Control><Shift>exclam");
         assert_eq!(t("shift+tab"), "<Shift>ISO_Left_Tab");
         assert_eq!(t("mod+="), "<Control>equal");
+        // Media keys by their XF86 keysyms; X has none for a TV's channels.
+        assert_eq!(t("playpause"), "XF86AudioPlay");
+        assert_eq!(t("next"), "XF86AudioNext");
+        assert_eq!(t("red"), "XF86Red");
+        assert_eq!(t("menu"), "Menu");
+        let none = |s| super::trigger(&Keystroke::parse(s, Os::Linux).unwrap(), us);
+        assert_eq!(none("channelup"), None);
+        // Every name is one GTK knows.
+        for name in [
+            "XF86AudioPlay",
+            "XF86AudioPause",
+            "XF86AudioStop",
+            "XF86AudioRewind",
+            "XF86AudioForward",
+            "XF86AudioRecord",
+            "XF86AudioNext",
+            "XF86AudioPrev",
+            "Menu",
+            "XF86Red",
+            "XF86Green",
+            "XF86Yellow",
+            "XF86Blue",
+        ] {
+            assert!(Key::from_name(name).is_some(), "{name}");
+        }
     }
 }

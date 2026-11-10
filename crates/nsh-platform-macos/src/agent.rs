@@ -545,6 +545,8 @@ impl Native for MacNative {
             Key::PageUp => "Page_Up".into(),
             Key::PageDown => "Page_Down".into(),
             Key::F(n) => format!("F{n}"),
+            // A Mac keyboard's media keys are system keys, not key events.
+            _ => return Err(format!("{keys:?} is no key of a Mac keyboard")),
         });
         self.activate();
         self.on_key(move |surface, window| synth::key(surface, window, &name))
