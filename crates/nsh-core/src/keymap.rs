@@ -229,7 +229,9 @@ impl Key {
             22 => Key::Right,
             61 => Key::Tab,
             62 => Key::Char(' '),
-            66 | 160 => Key::Enter,
+            // The D-pad's centre (a TV remote's OK) and a gamepad's A confirm, as
+            // Android's `KeyEvent.isConfirmKey` has them, with Enter and the keypad's.
+            23 | 66 | 96 | 160 => Key::Enter,
             67 => Key::Backspace,
             92 => Key::PageUp,
             93 => Key::PageDown,
@@ -926,8 +928,12 @@ mod tests {
         assert_eq!(Key::from_android_keycode(20), Some(Key::Down));
         assert_eq!(Key::from_android_keycode(76), Some(Key::Char('/')));
         assert_eq!(Key::from_android_keycode(160), Some(Key::Enter));
+        // A TV remote's OK (DPAD_CENTER) and a gamepad's A press Enter.
+        assert_eq!(Key::from_android_keycode(23), Some(Key::Enter));
+        assert_eq!(Key::from_android_keycode(96), Some(Key::Enter));
         assert_eq!(Key::from_android_keycode(59), None);
-        for code in (0..=300).filter(|c| *c != 160 && !(144..=153).contains(c)) {
+        let confirm = [23, 96, 160];
+        for code in (0..=300).filter(|c| !confirm.contains(c) && !(144..=153).contains(c)) {
             if let Some(key) = Key::from_android_keycode(code) {
                 assert_eq!(key.android_keycode(), Some(code), "{key:?}");
             }
