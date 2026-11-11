@@ -586,6 +586,8 @@ function Editor() {
 
 在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失；在 TSX 中，调用 `BackHandler.on` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/mobile`，`BackHandler` 的调用会立即返回，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
 
+在 iOS 上，应用监听返回时（返回监听器或浮层的 `onCancel`），VoiceOver 的退出手势和从屏幕左边缘向右滑就是返回事件，按同样的顺序处理。能弹出的栈自己接收侧滑，使用 UIKit 的交互式侧滑返回。
+
 ## 标签页与其他布局
 
 标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal；用 [`when` / `<If>`](../elements/control-flow.md)（或 TSX 中的函数子元素）渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的栈和路由，并让它们都保持挂载，用 `display: none` 隐藏未选中的标签。
