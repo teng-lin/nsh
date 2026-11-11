@@ -148,7 +148,13 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         f.width = w;
         f.height = h;
         v.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
+        int left = v.getLeft(), top = v.getTop();
         v.layout(f.left, f.top, f.right, f.bottom);
+        // Moved in a scroll view's content, which culls what is off screen
+        // (`ScrollBox.Content`): it draws its children again.
+        if ((left != f.left || top != f.top) && v.getParent() instanceof ScrollBox.Content) {
+            ((View) v.getParent()).invalidate();
+        }
     }
 
     @Override

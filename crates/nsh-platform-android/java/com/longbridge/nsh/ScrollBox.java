@@ -100,9 +100,64 @@ final class ScrollBox extends FrameLayout implements Node {
     /** The scrolled content, sized by the core (`ScrollContent`). */
     static final class Content extends Box {
         int contentWidth, contentHeight;
+        /** The scroll offset (px) the children were last drawn at, and
+         * whether they were culled to the viewport there. */
+        private int drawnX, drawnY;
+        private boolean culled;
 
         Content(Context context, Mounter mounter, int id) {
             super(context, mounter, id);
+        }
+
+        /** Beyond the viewport, children are drawn this far (px): a
+         * quarter viewport, a list's rows near it, what a child draws
+         * outside its bounds (shadows) and a scroll's next frames. */
+        private int margin(View scroller) {
+            return Math.max(Math.round(64 * getResources().getDisplayMetrics().density),
+                    Math.max(scroller.getWidth(), scroller.getHeight()) / 4);
+        }
+
+        /** Children wholly outside the viewport and its margin are not
+         * drawn: a virtualized list keeps a viewport of rows rendered on
+         * either side, which the render thread otherwise walks and records
+         * every frame (half its time on a TV box scrolling a guide). Laid
+         * out and attached as before; not when zoomed (scaled content). */
+        @Override
+        protected boolean drawChild(Canvas canvas, View child, long time) {
+            View scroller = getParent() instanceof View ? (View) getParent() : null;
+            if (scroller == null || getScaleX() != 1 || getScaleY() != 1 || child.getAnimation() != null) {
+                return super.drawChild(canvas, child, time);
+            }
+            int m = margin(scroller);
+            int left = scroller.getScrollX() - m, top = scroller.getScrollY() - m;
+            int right = scroller.getScrollX() + scroller.getWidth() + m;
+            int bottom = scroller.getScrollY() + scroller.getHeight() + m;
+            float x = child.getX(), y = child.getY();
+            if (x + child.getWidth() < left || x > right || y + child.getHeight() < top || y > bottom) {
+                return false;
+            }
+            return super.drawChild(canvas, child, time);
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas canvas) {
+            View scroller = getParent() instanceof View ? (View) getParent() : null;
+            if (scroller != null) {
+                drawnX = scroller.getScrollX();
+                drawnY = scroller.getScrollY();
+                culled = true;
+            }
+            super.dispatchDraw(canvas);
+        }
+
+        /** The scroll view moved to (`x`, `y`): draws the children again
+         * once that is half a margin from where they were culled. */
+        void scrolled(View scroller, int x, int y) {
+            int half = margin(scroller) / 2;
+            if (culled && (Math.abs(x - drawnX) > half || Math.abs(y - drawnY) > half)) {
+                culled = false;
+                invalidate();
+            }
         }
 
         @Override
@@ -158,6 +213,7 @@ final class ScrollBox extends FrameLayout implements Node {
         // The view or its content changed size: scroll what was clamped.
         scroller.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> payOwed());
         scroller.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+            content.scrolled(v, x, y);
             // Layout may clamp against a mixture of old and new pixel
             // sizes. Report only after restoring the logical offset.
             if (rescaling) return;
