@@ -502,9 +502,12 @@ impl Native for MacNative {
                 let root = (target != ROOT_ID)
                     .then(|| crate::window::root_view(surface, target))
                     .flatten();
+                // The window stays the input's, as after the user's own
+                // move: what changes under the pointer next (the controls
+                // a hover shows) is picked again in it, not in the main
+                // window, which would make the hovered views hear a leave.
                 crate::input::enter(surface, root);
                 crate::input::event(surface, &event);
-                crate::input::enter(surface, None);
             }
         })
         .ok_or_else(|| "the window is gone".to_owned())
