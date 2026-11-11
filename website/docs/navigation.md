@@ -581,6 +581,10 @@ function Editor() {
 A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
 `BackHandler.on` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
 
+On iOS, VoiceOver's escape gesture and a swipe in from the screen's left edge are the back press while your app
+listens (a back listener or an overlay's `onCancel`), handled in the same order. A stack that can pop takes the swipe
+itself, with UIKit's interactive swipe back.
+
 ## Tabs and other layouts
 
 A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab; render the selected tab's content with [`when` / `<If>`](../elements/control-flow.md) (or a function child in TSX). To keep each tab's state while switching, give each tab its own stack and routes and keep all of them mounted, hiding the inactive ones with `display: none`.

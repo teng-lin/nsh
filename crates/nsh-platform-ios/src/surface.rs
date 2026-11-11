@@ -15,6 +15,7 @@ use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::{Retained, Weak},
     runtime::{AnyObject, ProtocolObject},
+    sel,
 };
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_foundation::{
@@ -25,12 +26,14 @@ use objc2_ui_kit::{
     NSValueUIGeometryExtensions, UIApplication, UIApplicationDidBecomeActiveNotification,
     UIApplicationDidEnterBackgroundNotification, UIApplicationState,
     UIApplicationWillEnterForegroundNotification, UIApplicationWillResignActiveNotification,
-    UIDevice, UIFont, UIFontTextStyleBody, UIKeyboardAnimationCurveUserInfoKey,
-    UIKeyboardAnimationDurationUserInfoKey, UIKeyboardFrameEndUserInfoKey,
-    UIKeyboardWillChangeFrameNotification, UIKeyboardWillHideNotification, UIResponder,
-    UISceneActivationState, UISceneDidActivateNotification, UISceneDidEnterBackgroundNotification,
-    UISceneWillDeactivateNotification, UISceneWillEnterForegroundNotification, UITraitCollection,
-    UITraitEnvironment, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIWindowScene,
+    UIDevice, UIFont, UIFontTextStyleBody, UIGestureRecognizerState,
+    UIKeyboardAnimationCurveUserInfoKey, UIKeyboardAnimationDurationUserInfoKey,
+    UIKeyboardFrameEndUserInfoKey, UIKeyboardWillChangeFrameNotification,
+    UIKeyboardWillHideNotification, UIRectEdge, UIResponder, UISceneActivationState,
+    UISceneDidActivateNotification, UISceneDidEnterBackgroundNotification,
+    UISceneWillDeactivateNotification, UISceneWillEnterForegroundNotification,
+    UIScreenEdgePanGestureRecognizer, UITraitCollection, UITraitEnvironment, UIUserInterfaceIdiom,
+    UIUserInterfaceStyle, UIView, UIWindowScene,
 };
 
 use crate::{
@@ -183,20 +186,24 @@ define_class!(
         /// so this is how a VoiceOver user leaves it.
         #[unsafe(method(accessibilityPerformEscape))]
         fn accessibility_perform_escape(&self) -> bool {
-            let shared = self
-                .ivars()
-                .running
-                .borrow()
-                .as_ref()
-                .map(|r| r.mounter.clone());
-            let taken = shared.is_some_and(|shared| {
-                shared
-                    .get(self.mtm())
-                    .try_borrow()
-                    .is_ok_and(|m| m.as_ref().is_some_and(Mounter::escape))
-            });
+            let taken = self.with_mounter(Mounter::escape);
             // SAFETY: calling the superclass implementation.
             taken || unsafe { msg_send![super(self), accessibilityPerformEscape] }
+        }
+
+        /// A swipe from the screen's left edge: when it lifts far or fast
+        /// enough, the app's going back ([`Mounter::edge_swipe`]); a
+        /// navigation stack that can pop keeps its own swipe.
+        #[unsafe(method(edgeSwipe:))]
+        fn edge_swipe(&self, swipe: &UIScreenEdgePanGestureRecognizer) {
+            if swipe.state() != UIGestureRecognizerState::Ended {
+                return;
+            }
+            let distance = swipe.translationInView(Some(self)).x;
+            let speed = swipe.velocityInView(Some(self)).x;
+            if edge_swipe_goes_back(distance, speed) {
+                self.with_mounter(Mounter::edge_swipe);
+            }
         }
 
         #[unsafe(method(didMoveToWindow))]
@@ -292,7 +299,36 @@ define_class!(
     }
 );
 
+/// How far (points) or how fast (points per second) a swipe from the
+/// left edge must go, when the finger lifts, to be Back: a third of the
+/// way UIKit's own interactive pop needs at most, or a flick.
+const EDGE_SWIPE_DISTANCE: f64 = 80.0;
+const EDGE_SWIPE_SPEED: f64 = 500.0;
+
+/// Whether a swipe from the left edge that moved `distance` points right
+/// and lifted moving `speed` points per second right is Back (a swipe back
+/// toward the edge is not, however fast).
+pub(crate) fn edge_swipe_goes_back(distance: f64, speed: f64) -> bool {
+    speed >= 0.0 && (distance >= EDGE_SWIPE_DISTANCE || speed >= EDGE_SWIPE_SPEED)
+}
+
 impl RootView {
+    /// `f` on the running app's mounter (false without one).
+    fn with_mounter(&self, f: impl FnOnce(&Mounter) -> bool) -> bool {
+        let shared = self
+            .ivars()
+            .running
+            .borrow()
+            .as_ref()
+            .map(|r| r.mounter.clone());
+        shared.is_some_and(|shared| {
+            shared
+                .get(self.mtm())
+                .try_borrow()
+                .is_ok_and(|m| m.as_ref().is_some_and(f))
+        })
+    }
+
     fn new(
         mtm: MainThreadMarker,
         frame: CGRect,
@@ -318,7 +354,21 @@ impl RootView {
             test_model: TestModel::default(),
         });
         // SAFETY: UIView's designated initializer.
-        unsafe { msg_send![super(this), initWithFrame: frame] }
+        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        // iOS has no system Back: a swipe from the left edge is the app's,
+        // as Android's back gesture is (`edgeSwipe:`).
+        // SAFETY: UIGestureRecognizer's designated initializer; the view
+        // keeps the recognizer, which does not keep its target.
+        let swipe = unsafe {
+            UIScreenEdgePanGestureRecognizer::initWithTarget_action(
+                UIScreenEdgePanGestureRecognizer::alloc(mtm),
+                Some(&view),
+                Some(sel!(edgeSwipe:)),
+            )
+        };
+        swipe.setEdges(UIRectEdge::Left);
+        view.addGestureRecognizer(&swipe);
+        view
     }
 
     /// The running app's event target.
@@ -1230,4 +1280,21 @@ fn os_version(mtm: MainThreadMarker) -> (u16, u16) {
         let mut parts = version.split('.').map(|p| p.parse().unwrap_or(0));
         (parts.next().unwrap_or(0), parts.next().unwrap_or(0))
     })
+}
+
+#[cfg(test)]
+mod edge_swipe_tests {
+    use super::edge_swipe_goes_back;
+
+    #[test]
+    fn a_swipe_from_the_left_edge_is_back_far_or_fast_enough() {
+        // Far enough, slowly: back.
+        assert!(edge_swipe_goes_back(120.0, 0.0));
+        // A short flick: back.
+        assert!(edge_swipe_goes_back(30.0, 900.0));
+        // Short and slow: not yet.
+        assert!(!edge_swipe_goes_back(30.0, 100.0));
+        // Pulled back toward the edge before lifting: cancelled.
+        assert!(!edge_swipe_goes_back(120.0, -400.0));
+    }
 }

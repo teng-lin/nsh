@@ -954,6 +954,24 @@ impl Mounter {
         }
     }
 
+    /// A swipe from the screen's left edge ended far or fast enough
+    /// ([`crate::surface::edge_swipe_goes_back`]): a navigation stack that
+    /// can pop has its own swipe for it (UIKit's), so then nothing more;
+    /// else it is [`Self::escape`], the app's going back. Whether it was
+    /// taken.
+    pub(crate) fn edge_swipe(&self) -> bool {
+        let stack_pops = self.views.iter().enumerate().any(|(id, slot)| {
+            matches!(
+                slot,
+                Some(Slot {
+                    native: Native::Stack(_),
+                    ..
+                })
+            ) && self.stack_can_pop(id as NodeId)
+        });
+        !stack_pops && self.escape()
+    }
+
     /// VoiceOver's escape gesture (or the test agent's `back`) reached the
     /// surface: while the app listens to going back (an overlay's
     /// `onCancel`, a back listener), the core hears it as the back button
