@@ -1315,6 +1315,25 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     report(surface, id);
 }
 
+/// Where a new window opens: the app's `position`, else by its `kind`
+/// (a dialog over its parent, a popup or overlay centered), centered on
+/// the display it asks for; `None` cascades it from its parent's (or the
+/// main window's) top left. The app's position comes first: deciding the
+/// default must not place the window already.
+fn opening_position(
+    position: Option<WindowPosition>,
+    kind: WindowKind,
+    display: bool,
+    parent: bool,
+) -> Option<WindowPosition> {
+    position.or(match kind {
+        WindowKind::Dialog if parent => Some(WindowPosition::ParentCenter),
+        WindowKind::Popup | WindowKind::Overlay => Some(WindowPosition::Center),
+        _ if display => Some(WindowPosition::Center),
+        _ => None,
+    })
+}
+
 /// Places a new window: at `position`, on `display`, by its `kind` and
 /// over its parent.
 fn place(
@@ -1331,23 +1350,19 @@ fn place(
         .or_else(|| parent.and_then(|p| p.screen()))
         .or_else(|| surface.root.ns().window().and_then(|w| w.screen()))
         .or_else(|| NSScreen::mainScreen(mtm));
-    let position = position.unwrap_or(match kind {
-        WindowKind::Dialog if parent.is_some() => WindowPosition::ParentCenter,
-        WindowKind::Popup | WindowKind::Overlay => WindowPosition::Center,
-        _ if display.is_some() => WindowPosition::Center,
-        _ => {
-            // Cascaded from the parent's (or the main window's) top left.
-            let step = CASCADE * (surface.windows.borrow().len() % 8 + 1) as f64;
-            let from = parent
-                .map(|p| p.frame())
-                .or_else(|| surface.root.ns().window().map(|w| w.frame()));
-            let top_left = from.map_or(NSPoint::new(step, step), |f| {
-                NSPoint::new(f.origin.x + step, f.origin.y + f.size.height - step)
-            });
-            window.setFrameTopLeftPoint(top_left);
-            return;
-        }
-    });
+    let Some(position) = opening_position(position, kind, display.is_some(), parent.is_some())
+    else {
+        // Cascaded from the parent's (or the main window's) top left.
+        let step = CASCADE * (surface.windows.borrow().len() % 8 + 1) as f64;
+        let from = parent
+            .map(|p| p.frame())
+            .or_else(|| surface.root.ns().window().map(|w| w.frame()));
+        let top_left = from.map_or(NSPoint::new(step, step), |f| {
+            NSPoint::new(f.origin.x + step, f.origin.y + f.size.height - step)
+        });
+        window.setFrameTopLeftPoint(top_left);
+        return;
+    };
     match position {
         WindowPosition::At(p) => {
             let primary = crate::window_state::primary_height(mtm);
@@ -2279,6 +2294,36 @@ mod tests {
             closable: true,
             activate: true,
         }
+    }
+
+    #[test]
+    fn a_window_opens_where_the_app_asks() {
+        use nsh_core::geometry::point;
+        let at = WindowPosition::At(point(Points(846.0), Points(542.0)));
+        // The app's position wins over every default, a cascade included.
+        for kind in [WindowKind::Normal, WindowKind::Panel, WindowKind::Dialog] {
+            assert_eq!(opening_position(Some(at), kind, false, false), Some(at));
+            assert_eq!(opening_position(Some(at), kind, true, true), Some(at));
+        }
+        // Without one: a normal window cascades, a dialog centers on its
+        // parent, a popup on the display, one that asks for a display on
+        // it.
+        assert_eq!(
+            opening_position(None, WindowKind::Normal, false, false),
+            None
+        );
+        assert_eq!(
+            opening_position(None, WindowKind::Dialog, false, true),
+            Some(WindowPosition::ParentCenter)
+        );
+        assert_eq!(
+            opening_position(None, WindowKind::Popup, false, false),
+            Some(WindowPosition::Center)
+        );
+        assert_eq!(
+            opening_position(None, WindowKind::Normal, true, false),
+            Some(WindowPosition::Center)
+        );
     }
 
     #[test]
