@@ -138,8 +138,10 @@ final class TextLayouts {
                 if (typeface != null && !typeface.equals(Typeface.DEFAULT)) return typeface;
             }
         }
-        int style = (weight >= 600 && baseWeight < 600 ? Typeface.BOLD : 0)
-                | (italic && !baseItalic ? Typeface.ITALIC : 0);
+        boolean bold = weight >= 600 && baseWeight < 600;
+        boolean slant = italic && !baseItalic;
+        int style = bold ? (slant ? Typeface.BOLD_ITALIC : Typeface.BOLD)
+                : (slant ? Typeface.ITALIC : Typeface.NORMAL);
         return style == 0 ? base : Typeface.create(base, style);
     }
 
@@ -281,6 +283,7 @@ final class TextLayouts {
     }
 
     /** A registered face as a font family of one font (Android 10+). */
+    @android.annotation.TargetApi(29)
     private static android.graphics.fonts.FontFamily fontFamily(Face face) throws java.io.IOException {
         android.graphics.fonts.Font font = new android.graphics.fonts.Font.Builder(face.file)
                 .setWeight(clamp(face.weight))
@@ -381,9 +384,9 @@ final class TextLayouts {
                     .setTextDirection(direction)
                     .setIncludePad(false)
                     .setLineSpacing(0f, 1f)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
-            if (justify) b.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD);
+            if (justify) b.setJustificationMode(android.graphics.text.LineBreaker.JUSTIFICATION_MODE_INTER_WORD);
             if (maxLines > 0) {
                 b.setMaxLines(maxLines);
                 if (ellipsize != null) b.setEllipsize(ellipsize);
@@ -506,7 +509,7 @@ final class TextLayouts {
         CharSequence measured = s;
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             PrecomputedText.Params params = new PrecomputedText.Params.Builder(paint)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
                     .setTextDirection(direction)
                     .build();

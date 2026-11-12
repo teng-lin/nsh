@@ -767,6 +767,7 @@ final class CanvasBox extends Box {
         canvas.restore();
     }
 
+    @android.annotation.TargetApi(29)
     private static BlendMode blend(int c) {
         switch (c) {
             case 1: return BlendMode.SRC_IN;

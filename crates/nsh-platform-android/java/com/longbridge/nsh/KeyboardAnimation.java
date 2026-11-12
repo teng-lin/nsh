@@ -8,6 +8,7 @@ import java.util.List;
  * The keyboard's curve and duration for Android 11+ (only loaded there, so
  * that {@code NshView} verifies without these types on older versions).
  */
+@android.annotation.TargetApi(30)
 final class KeyboardAnimation {
     private KeyboardAnimation() {}
 

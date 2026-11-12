@@ -216,6 +216,7 @@ final class Effects {
     /** Tag key marking layers this class set (an id unlikely to clash). */
     private static final int R_LAYER = 0x7f0e7f01;
 
+    @android.annotation.TargetApi(29)
     private static BlendMode blendMode(int code) {
         switch (code) {
             case 1: return BlendMode.MULTIPLY;

@@ -8,6 +8,7 @@ import android.widget.EditText;
  * Pastes and keyboards' content for Android 12+ (only loaded there, so that
  * {@code InputBox} verifies without these types on older versions).
  */
+@android.annotation.TargetApi(31)
 final class InputContent {
     private InputContent() {}
 

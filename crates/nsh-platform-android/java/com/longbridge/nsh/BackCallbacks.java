@@ -17,6 +17,7 @@ final class BackCallbacks {
         return (OnBackInvokedCallback) view::handleBack;
     }
 
+    @android.annotation.TargetApi(34)
     private static final class Animated implements OnBackAnimationCallback {
         private final NshView view;
         private final Mounter mounter;
