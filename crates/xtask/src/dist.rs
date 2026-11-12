@@ -347,9 +347,9 @@ fn web_runtimes(root: &Path, out: &Path, release: &Path) -> anyhow::Result<()> {
             "nsh-dev.wasm",
         ),
     ] {
-        let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        let mut web = crate::cargo::command("build");
         web.current_dir(root)
-            .args(["build", "--profile", "web", "-p", "nsh-platform-web"])
+            .args(["--profile", "web", "-p", "nsh-platform-web"])
             .args(features)
             .args(["--target", "wasm32-unknown-unknown"]);
         if env::var_os("AR_wasm32_unknown_unknown").is_none() && env::var_os("AR").is_none() {
@@ -516,9 +516,11 @@ fn zip_dir(dir: &Path, archive: &Path) -> anyhow::Result<()> {
 
 /// `cargo <args>` in the workspace: the step "building <what>".
 pub(crate) fn cargo(args: &[&str], what: &str) -> anyhow::Result<()> {
-    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let (subcommand, args) = args.split_first().context("missing Cargo subcommand")?;
     term::cargo(
-        Command::new(cargo).current_dir(android::root()).args(args),
+        crate::cargo::command(subcommand)
+            .current_dir(android::root())
+            .args(args),
         what,
     )
 }
@@ -532,9 +534,9 @@ fn exe(name: &str) -> String {
 /// The directory of package `name` as the workspace at `root` resolves
 /// it (`cargo metadata`).
 fn package_dir(root: &Path, name: &str) -> anyhow::Result<std::path::PathBuf> {
-    let output = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+    let output = crate::cargo::command("metadata")
         .current_dir(root)
-        .args(["metadata", "--format-version", "1"])
+        .args(["--format-version", "1"])
         .output()
         .context("run cargo metadata")?;
     anyhow::ensure!(

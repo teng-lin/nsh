@@ -131,8 +131,8 @@ fn is_source(path: &Path) -> bool {
 
 fn build_cli(root: &Path) -> anyhow::Result<()> {
     term::cargo(
-        Command::new("cargo")
-            .args(["build", "-p", "nsh-cli"])
+        crate::cargo::command("build")
+            .args(["-p", "nsh-cli"])
             .current_dir(root),
         "nsh",
     )
