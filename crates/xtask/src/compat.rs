@@ -22,9 +22,6 @@ use crate::{android::root, term};
 /// Where the repository is cloned from.
 const REPOSITORY: &str = "https://github.com/longbridge/nsh-compat.git";
 
-// This fork's API predates the harness's upstream input API changes.
-const REVISION: &str = include_str!("../../../tests/compat/harness.rev");
-
 pub(crate) fn compat(record: Option<&str>) -> anyhow::Result<()> {
     let root = root();
     let repo = checkout(&root)?;
@@ -87,7 +84,10 @@ fn checkout(root: &Path) -> anyhow::Result<PathBuf> {
         )?;
     }
     if update {
-        let revision = REVISION.trim();
+        // Read only for this command: other xtasks do not depend on the harness.
+        let revision = std::fs::read_to_string(root.join("tests/compat/harness.rev"))
+            .context("read compatibility harness revision")?;
+        let revision = revision.trim();
         anyhow::ensure!(
             revision.len() == 40
                 && revision
