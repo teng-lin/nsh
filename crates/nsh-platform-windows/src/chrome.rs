@@ -269,11 +269,18 @@ fn scale_of(surface: &Surface, hwnd: HWND) -> f32 {
     }
 }
 
-/// The width of the window's client area, in points.
-fn client_width(surface: &Surface, hwnd: HWND) -> f32 {
+/// The window's client area, in its own pixels (empty when the window is
+/// gone).
+fn client_rect(hwnd: HWND) -> RECT {
     let mut rect = RECT::default();
     // SAFETY: a query with a local out value.
     let _ = unsafe { GetClientRect(hwnd, &mut rect) };
+    rect
+}
+
+/// The width of the window's client area, in points.
+fn client_width(surface: &Surface, hwnd: HWND) -> f32 {
+    let rect = client_rect(hwnd);
     (rect.right - rect.left) as f32 / scale_of(surface, hwnd)
 }
 
@@ -693,75 +700,98 @@ pub(crate) fn nc_hit_test(surface: &Surface, hwnd: HWND, lparam: LPARAM) -> Opti
     result(code)
 }
 
-/// Client and non-client tracking send separate leave messages. Crossing from
-/// a drag region to an ordinary button has not left the app's content.
-pub(crate) fn pointer_left_region(surface: &Rc<Surface>, hwnd: HWND) {
-    let at = (|| {
-        let mut p = POINT::default();
-        // SAFETY: queries on this thread's live window, with local out values.
-        unsafe { GetCursorPos(&mut p) }.ok()?;
-        if unsafe { WindowFromPoint(p) } != hwnd {
-            return None;
-        }
-        let packed = LPARAM(((p.x as u16 as u32) | ((p.y as u16 as u32) << 16)) as isize);
-        let code = nc_hit_test(surface, hwnd, packed)?.0 as u32;
-        unsafe { windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut p) }
-            .ok()
-            .ok()?;
-        let scale = scale_of(surface, hwnd);
-        let at = (p.x as f32 / scale, p.y as f32 / scale);
-        content_hit(code, caption_at(surface, hwnd, at.0, at.1).is_some())
-            .then_some((at, code))
-    })();
+/// A leave message of window `hwnd` came: the client area's
+/// (`WM_MOUSELEAVE`) or the non-client area's (`WM_NCMOUSELEAVE`). The two
+/// are tracked apart, so either only says that the pointer left one of
+/// them: crossing from a drag region to an ordinary button has not left the
+/// app's content. Where the pointer is now decides: over the app's content
+/// the views hear it move there, with the buttons the window holds,
+/// anywhere else they hear it leave. `owned`: the leave is of the area the
+/// views were hovered in; one that is not only ends a hover (the area the
+/// pointer is in now reports its own moves).
+pub(crate) fn pointer_left_region(surface: &Rc<Surface>, hwnd: HWND, owned: bool) {
+    let at = content_under_pointer(surface, hwnd);
+    if !leave_reports(owned, at.is_some()) {
+        return;
+    }
     if let Some(shell) = crate::window::shell(hwnd) {
         restore_region_hover(&shell.view_hover, at.map(|(_, code)| code));
     }
-    crate::window::nc_pointer(surface, at.map(|(position, _)| position));
+    crate::window::nc_pointer(surface, hwnd, at.map(|(position, _)| position));
 }
 
-// A queued leave can arrive after the pointer has returned to a drag region.
-// Preserve ownership of the next non-client leave, but client tracking takes
-// over when the recheck finds HTCLIENT.
-fn restore_region_hover(hover: &std::cell::Cell<bool>, content: Option<u32>) {
+/// Where the pointer is now (client points) with the window's hit test code
+/// there, when it is over the app's content in window `hwnd`: not over
+/// another window, a border, the system's title bar or a drawn caption
+/// button.
+fn content_under_pointer(surface: &Surface, hwnd: HWND) -> Option<((f32, f32), u32)> {
+    let mut p = POINT::default();
+    // SAFETY: a query with a local out value.
+    unsafe { GetCursorPos(&mut p) }.ok()?;
+    // SAFETY: a plain query of the window at a point.
+    if unsafe { WindowFromPoint(p) } != hwnd {
+        return None;
+    }
+    let packed = LPARAM(((p.x as u16 as u32) | ((p.y as u16 as u32) << 16)) as isize);
+    // The window's own answer, as the system gets it: an embedded view has
+    // no frame of its own, so it is all client area whatever its views are
+    // marked.
+    // SAFETY: a message sent to a live window of this thread, the one whose
+    // message is being handled; its procedure answers hit tests reentrantly.
+    let code = unsafe { SendMessageW(hwnd, WM_NCHITTEST, None, Some(packed)) }.0 as u32;
+    let client = client_rect(hwnd);
+    // SAFETY: a plain call with a local value.
+    unsafe { windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut p) }
+        .ok()
+        .ok()?;
+    let scale = scale_of(surface, hwnd);
+    let at = (p.x as f32 / scale, p.y as f32 / scale);
+    let drawn = caption_at(surface, hwnd, at.0, at.1).is_some();
+    content_hit(code, drawn, in_client(p, client)).then_some((at, code))
+}
+
+/// A queued leave can arrive after the pointer has returned to a drag
+/// region. Preserve ownership of the next non-client leave, but client
+/// tracking takes over when the recheck finds `HTCLIENT`.
+fn restore_region_hover(hover: &Cell<bool>, content: Option<u32>) {
     hover.set(content.is_some_and(|code| code != HTCLIENT));
 }
 
-fn content_hit(code: u32, drawn_caption: bool) -> bool {
-    !drawn_caption
+/// A point with hit test code `code` is over the app's content: its views,
+/// those answering as the frame (`windowDrag`, `windowControl`) included.
+/// The system's title bar answers with the same codes outside the client
+/// area, and the drawn caption buttons are no views of the app's.
+fn content_hit(code: u32, drawn_caption: bool, in_client: bool) -> bool {
+    in_client
+        && !drawn_caption
         && matches!(
             code,
             HTCLIENT | HTCAPTION | HTMINBUTTON | HTMAXBUTTON | HTCLOSE
         )
 }
 
-#[cfg(test)]
-mod pointer_tests {
-    use super::*;
+/// `p` (client pixels) is inside the client area `client`.
+fn in_client(p: POINT, client: RECT) -> bool {
+    (client.left..client.right).contains(&p.x) && (client.top..client.bottom).contains(&p.y)
+}
 
-    #[test]
-    fn delayed_leave_retains_cleanup_for_a_returned_drag_pointer() {
-        let hover = std::cell::Cell::new(true);
-        assert!(hover.replace(false)); // The queued non-client leave.
-        restore_region_hover(&hover, Some(HTCAPTION));
-        // The next border move must see retained ownership and send Leave.
-        assert!(hover.get());
-        hover.set(false);
-        restore_region_hover(&hover, None);
-        assert!(!hover.get());
-        restore_region_hover(&hover, Some(HTCLIENT));
-        assert!(!hover.get());
-    }
+/// Whether a non-client leave rechecks where the pointer is: when it owns
+/// the views' hover (`owned`), and when nothing else would end one. A
+/// client leave whose recheck found the pointer back in the client area
+/// keeps the hover without tracking it again (tracking there would post a
+/// leave at once while the system still has the pointer elsewhere), so
+/// until the next client move arms the tracking this leave is the last
+/// message that can end it.
+fn nc_leave_rechecks(owned: bool, client_tracked: bool) -> bool {
+    owned || !client_tracked
+}
 
-    #[test]
-    fn drag_to_button_keeps_content_hover_but_border_and_system_caption_leave() {
-        for code in [HTCAPTION, HTCLIENT, HTCLOSE] {
-            assert!(content_hit(code, false));
-        }
-        for code in [HTTOP, HTBOTTOMRIGHT, HTNOWHERE] {
-            assert!(!content_hit(code, false));
-        }
-        assert!(!content_hit(HTCLOSE, true));
-    }
+/// Whether the views hear of a rechecked leave: always when it is of the
+/// area they were hovered in; one of another area only tells them the
+/// pointer left, never moves them (`content`: the pointer is over the app's
+/// content now).
+fn leave_reports(owned: bool, content: bool) -> bool {
+    owned || !content
 }
 
 fn is_button(code: u32) -> bool {
@@ -818,10 +848,14 @@ pub(crate) fn nc_mouse(
             );
             // Over the app's title bar's views (not the drawn buttons, not
             // the borders): they hear it as the client area's moves.
-            let on_view = !drawn && matches!(code, HTCAPTION | HTMINBUTTON | HTMAXBUTTON | HTCLOSE);
+            // The system's title bar answers with the same codes, above the
+            // client area: no view is there.
+            let on_view = !drawn
+                && matches!(code, HTCAPTION | HTMINBUTTON | HTMAXBUTTON | HTCLOSE)
+                && in_client(p, client_rect(hwnd));
             if on_view || shell.view_hover.get() {
                 shell.view_hover.set(on_view);
-                crate::window::nc_pointer(surface, on_view.then_some((x, y)));
+                crate::window::nc_pointer(surface, hwnd, on_view.then_some((x, y)));
             }
             None
         }
@@ -829,8 +863,9 @@ pub(crate) fn nc_mouse(
             shell.nc_tracking.set(false);
             shell.pressed.set(0);
             set_hover(surface, hwnd, 0);
-            if shell.view_hover.replace(false) {
-                pointer_left_region(surface, hwnd);
+            let owned = shell.view_hover.replace(false);
+            if nc_leave_rechecks(owned, crate::window::client_tracked(hwnd)) {
+                pointer_left_region(surface, hwnd, owned);
             }
             None
         }
@@ -1778,4 +1813,157 @@ pub(crate) fn appearance_changed(surface: &Surface) {
         let _ = unsafe { DrawMenuBar(hwnd) };
     }
     surface.invalidate();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CLIENT: RECT = RECT {
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+    };
+
+    fn point(x: i32, y: i32) -> POINT {
+        POINT { x, y }
+    }
+
+    #[test]
+    fn delayed_leave_retains_cleanup_for_a_returned_drag_pointer() {
+        let hover = Cell::new(true);
+        assert!(hover.replace(false)); // The queued non-client leave.
+        restore_region_hover(&hover, Some(HTCAPTION));
+        // The next border move must see retained ownership and send Leave.
+        assert!(hover.get());
+        hover.set(false);
+        restore_region_hover(&hover, None);
+        assert!(!hover.get());
+        restore_region_hover(&hover, Some(HTCLIENT));
+        assert!(!hover.get());
+    }
+
+    #[test]
+    fn drag_to_button_keeps_content_hover_but_borders_and_drawn_buttons_leave() {
+        for code in [HTCAPTION, HTCLIENT, HTCLOSE] {
+            assert!(content_hit(code, false, true));
+        }
+        for code in [HTTOP, HTBOTTOMRIGHT, HTNOWHERE, HTTRANSPARENT as u32] {
+            assert!(!content_hit(code, false, true));
+        }
+        assert!(!content_hit(HTCLOSE, true, true));
+    }
+
+    #[test]
+    fn the_system_title_bar_is_not_the_apps_content() {
+        // The client area's edges: left and top are inside, right and
+        // bottom are the first pixels outside.
+        assert!(in_client(point(0, 0), CLIENT));
+        assert!(in_client(point(799, 599), CLIENT));
+        assert!(!in_client(point(800, 300), CLIENT));
+        assert!(!in_client(point(400, 600), CLIENT));
+        assert!(!in_client(point(-1, 300), CLIENT));
+        // A window that is gone has no client area.
+        assert!(!in_client(point(0, 0), RECT::default()));
+        // The system's caption and its buttons answer as a `windowDrag` or
+        // `windowControl` view does, above the client area; such a view is
+        // inside it, with the system title bar or without.
+        let caption = point(400, -12);
+        let drag_view = point(400, 12);
+        for code in [HTCAPTION, HTMINBUTTON, HTMAXBUTTON, HTCLOSE] {
+            assert!(!content_hit(code, false, in_client(caption, CLIENT)));
+            assert!(content_hit(code, false, in_client(drag_view, CLIENT)));
+        }
+    }
+
+    /// The window's tracking as its messages leave it: the client area's
+    /// (`WindowData::tracking`) and the hover a non-client leave owns
+    /// (`Shell::view_hover`), with what the views were told last.
+    struct Tracked {
+        client: Cell<bool>,
+        view_hover: Cell<bool>,
+        hovered: Cell<bool>,
+    }
+
+    impl Tracked {
+        /// Over an ordinary view, its moves heard.
+        fn over_client() -> Self {
+            Self {
+                client: Cell::new(true),
+                view_hover: Cell::new(false),
+                hovered: Cell::new(true),
+            }
+        }
+
+        /// A rechecked leave: `content` is the code under the pointer now,
+        /// if it is over the app's content.
+        fn rechecked(&self, owned: bool, content: Option<u32>) {
+            if !leave_reports(owned, content.is_some()) {
+                return;
+            }
+            restore_region_hover(&self.view_hover, content);
+            self.hovered.set(content.is_some());
+        }
+
+        fn client_leave(&self, content: Option<u32>) {
+            self.client.set(false);
+            self.rechecked(true, content);
+        }
+
+        fn nc_leave(&self, content: Option<u32>) {
+            let owned = self.view_hover.replace(false);
+            if nc_leave_rechecks(owned, self.client.get()) {
+                self.rechecked(owned, content);
+            }
+        }
+    }
+
+    #[test]
+    fn a_hover_kept_by_a_client_leave_ends_with_the_non_client_leave() {
+        // Client, a side border, back in the client before the queued
+        // client leave runs: the views stay hovered, untracked.
+        let window = Tracked::over_client();
+        window.client_leave(Some(HTCLIENT));
+        assert!(window.hovered.get() && !window.view_hover.get());
+        // Out of the window before a client move is retrieved: the border's
+        // leave is all that is left to say so.
+        window.nc_leave(None);
+        assert!(!window.hovered.get());
+    }
+
+    #[test]
+    fn a_non_client_leave_without_the_hover_never_moves_the_views() {
+        // A border to an ordinary view: the client move came first and
+        // tracks the client area, so the border's leave has nothing to do.
+        let window = Tracked::over_client();
+        assert!(!nc_leave_rechecks(false, window.client.get()));
+        window.nc_leave(None);
+        assert!(window.hovered.get());
+        // Untracked, it rechecks, and finds the pointer over the content:
+        // the views hear nothing (the move there is still to come), and it
+        // takes no ownership of a hover it did not have.
+        window.client.set(false);
+        window.hovered.set(false);
+        window.nc_leave(Some(HTCAPTION));
+        assert!(!window.hovered.get() && !window.view_hover.get());
+    }
+
+    #[test]
+    fn a_drag_region_and_a_button_hand_the_hover_to_each_other() {
+        // To a drag region: its move set the ownership, the client leave's
+        // recheck keeps it.
+        let window = Tracked::over_client();
+        window.view_hover.set(true);
+        window.client_leave(Some(HTCAPTION));
+        assert!(window.hovered.get() && window.view_hover.get());
+        // Back to the button: its move tracks the client area, and the
+        // non-client leave hands the hover over.
+        window.client.set(true);
+        window.nc_leave(Some(HTCLIENT));
+        assert!(window.hovered.get() && !window.view_hover.get());
+        // Out of the window from there.
+        window.client_leave(None);
+        assert!(!window.hovered.get());
+    }
 }
