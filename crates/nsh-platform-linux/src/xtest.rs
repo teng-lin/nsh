@@ -334,9 +334,9 @@ pub(crate) fn char_keysym(c: char) -> KeySym {
 }
 
 /// The keysym of a key of `nsh_core::keymap` (a `Char` is unshifted).
-pub(crate) fn key_keysym(key: nsh_core::keymap::Key) -> KeySym {
+pub(crate) fn key_keysym(key: nsh_core::keymap::Key) -> Option<KeySym> {
     use nsh_core::keymap::Key as K;
-    match key {
+    Some(match key {
         K::Char(c) => char_keysym(c),
         K::Enter => 0xff0d,
         K::Escape => 0xff1b,
@@ -352,8 +352,23 @@ pub(crate) fn key_keysym(key: nsh_core::keymap::Key) -> KeySym {
         K::End => 0xff57,
         K::PageUp => 0xff55,
         K::PageDown => 0xff56,
+        K::MediaPlayPause => 0x1008ff14,
+        K::MediaPause => 0x1008ff31,
+        K::MediaStop => 0x1008ff15,
+        K::MediaRewind => 0x1008ff3e,
+        K::MediaFastForward => 0x1008ff97,
+        K::MediaRecord => 0x1008ff1c,
+        K::MediaNext => 0x1008ff17,
+        K::MediaPrevious => 0x1008ff16,
+        K::Menu => 0xff67,
+        K::ColorRed => 0x1008ffa3,
+        K::ColorGreen => 0x1008ffa4,
+        K::ColorYellow => 0x1008ffa5,
+        K::ColorBlue => 0x1008ffa6,
+        // Match keymap::trigger: these have no binding on this backend.
+        K::MediaPlay | K::ChannelUp | K::ChannelDown | K::Guide | K::Back | K::Info => return None,
         K::F(n) => 0xffbe + KeySym::from(n.saturating_sub(1)),
-    }
+    })
 }
 
 /// A modifier's keysym by its name in `holdKeys` / `pressKeys`.
@@ -373,6 +388,40 @@ mod tests {
 
     use super::*;
     use crate::gtk_test::{run, wait_until};
+
+    #[test]
+    fn media_keysyms_match_the_linux_binding_names() {
+        use gtk::glib::translate::IntoGlib;
+        use nsh_core::keymap::Key;
+        for (key, name) in [
+            (Key::MediaPlayPause, "XF86AudioPlay"),
+            (Key::MediaPause, "XF86AudioPause"),
+            (Key::MediaStop, "XF86AudioStop"),
+            (Key::MediaRewind, "XF86AudioRewind"),
+            (Key::MediaFastForward, "XF86AudioForward"),
+            (Key::MediaRecord, "XF86AudioRecord"),
+            (Key::MediaNext, "XF86AudioNext"),
+            (Key::MediaPrevious, "XF86AudioPrev"),
+            (Key::Menu, "Menu"),
+            (Key::ColorRed, "XF86Red"),
+            (Key::ColorGreen, "XF86Green"),
+            (Key::ColorYellow, "XF86Yellow"),
+            (Key::ColorBlue, "XF86Blue"),
+        ] {
+            let native = gtk::gdk::Key::from_name(name).unwrap();
+            assert_eq!(key_keysym(key), Some(KeySym::from(native.into_glib())));
+        }
+        for key in [
+            Key::MediaPlay,
+            Key::ChannelUp,
+            Key::ChannelDown,
+            Key::Guide,
+            Key::Back,
+            Key::Info,
+        ] {
+            assert_eq!(key_keysym(key), None);
+        }
+    }
 
     #[test]
     fn real_keys_reach_gtk_shortcuts_editing_and_held_modifiers() {
