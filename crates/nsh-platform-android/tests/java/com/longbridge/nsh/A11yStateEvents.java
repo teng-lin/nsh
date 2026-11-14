@@ -32,6 +32,9 @@ public final class A11yStateEvents {
         expect("unchecked", view, AccessibilityEvent.TYPE_VIEW_CLICKED, 0);
         update(view, state(0), state(2));
         expect("selected", view, AccessibilityEvent.TYPE_VIEW_CLICKED, 0);
+        update(view, state(2), state(0));
+        expect("deselected only invalidates the cache", view,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.CONTENT_CHANGE_TYPE_UNDEFINED);
         update(view, state(64), state(192));
         expect("expanded", view, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
                 AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION);
@@ -71,7 +74,7 @@ public final class A11yStateEvents {
             throw new AssertionError("event must report the same switch role and checked state as its node");
         }
         event.recycle();
-        System.out.println("A11yStateEvents: 14 passed");
+        System.out.println("A11yStateEvents: 15 passed");
         System.exit(0);
     }
 

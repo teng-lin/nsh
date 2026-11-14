@@ -7,7 +7,7 @@ public final class A11yChangesTest {
         expect("checked to unchecked", 24, 8, false, false, false, A11yChanges.CHECKED_OR_SELECTED);
         expect("unchanged checkbox", 24, 24, false, false, false, A11yChanges.NONE);
         expect("selected", 0, 2, false, false, false, A11yChanges.CHECKED_OR_SELECTED);
-        expect("unselected", 2, 0, false, false, false, A11yChanges.CHECKED_OR_SELECTED);
+        expect("unselected only invalidates the cache", 2, 0, false, false, false, A11yChanges.NONE);
         expect("unchanged selected", 2, 2, false, false, false, A11yChanges.NONE);
         expect("pressed toggle", 256, 768, false, false, false, A11yChanges.CHECKED_OR_SELECTED);
         expect("released toggle", 768, 256, false, false, false, A11yChanges.CHECKED_OR_SELECTED);

@@ -12,7 +12,9 @@ final class A11yChanges {
         // A pressed state overrides checked in A11y's node, as on a ToggleButton.
         int checked = checked(after);
         if (checked != 0 && checked != checked(before)) return CHECKED_OR_SELECTED;
-        if (((before ^ after) & 2) != 0) return CHECKED_OR_SELECTED;
+        // Selection names the current item, not a toggle. Clearing it only invalidates the cache;
+        // TalkBack has no derived "unselected" speech, and a click would add a bare tick.
+        if ((before & 2) == 0 && (after & 2) != 0) return CHECKED_OR_SELECTED;
         if (rangeChanged) return RANGE;
         return descriptionChanged ? DESCRIPTION : NONE;
     }
