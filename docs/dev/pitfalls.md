@@ -669,6 +669,17 @@ Things that were found the hard way. Read the section of the area you change bef
   are written early: registered components' animated props (`set_animated_number`, `set_animated_color`) still reach
   them after the batches (`native::component_animated`), so a component that draws in its view
   (`NativeComponent::draw`) draws such a frame without the values its batch set.
+- **The client and the non-client area are tracked for leaves apart** (`TrackMouseEvent`'s `TME_LEAVE` without and
+  with `TME_NONCLIENT`), and a view marked `windowDrag` or `windowControl` is non-client area inside the app's content
+  (`HTCAPTION`, `HTCLOSE`, ...): moving between one and an ordinary view posts the leave of the area left, which
+  can be handled after the other area's move. Taken as leaving the window, it clears the hover that move just set. A
+  leave message therefore only asks where the pointer is now (`chrome::pointer_left_region`: `GetCursorPos`,
+  `WindowFromPoint`, the window's own answer to `WM_NCHITTEST`, and the client rectangle, since the system's title bar
+  answers `HTCAPTION` as a drag region does), and the views hear a move there or a leave. A leave message ends its
+  tracking, and `TrackMouseEvent` posts one at once when the pointer is not in the area it is asked to track, where
+  the system may not have it yet although `GetCursorPos` does: the recheck never tracks again (leaves would follow one
+  another ahead of every input message), the next mouse message does, and until then the other area's leave rechecks
+  too.
 
 ## Web, browsers
 

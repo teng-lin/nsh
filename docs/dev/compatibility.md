@@ -9,6 +9,12 @@ This page is the contract and how it is enforced. It holds from the first releas
 `nsh-compat` ("Releasing") on, and for good, whatever the version number says; earlier versions made no promises.
 No release is recorded yet, 0.3.0 and 0.4.0 included: the first one recorded starts the contract.
 
+The `tv-keys` fork pins its external harness in `tests/compat/harness.rev`, shared by CI and
+`cargo xtask compat`. Upstream harness changes now require input APIs newer than this fork
+(`find_at`, touch modifiers and pointer type). The pin includes the duplicate-build isolation
+fix and preserves the frozen release records; it changes no test assertion. Advance it when
+the fork adopts those APIs, and run the complete compatibility suite with each update.
+
 ## What apps depend on
 
 | Surface | Where it is | Why it matters |

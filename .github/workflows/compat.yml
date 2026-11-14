@@ -94,10 +94,19 @@ jobs:
         with:
           path: nsh
 
+      - name: Read the fork's compatibility harness revision
+        id: harness
+        if: steps.run.outputs.check == 'true'
+        run: |
+          revision=$(cat nsh/tests/compat/harness.rev)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         if: steps.run.outputs.check == 'true'
         with:
           repository: longbridge/nsh-compat
+          ref: ${{ steps.harness.outputs.revision }}
           path: nsh-compat
 
       # QuickJS is C (bindgen needs libclang).

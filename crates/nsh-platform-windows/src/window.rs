@@ -1096,10 +1096,7 @@ fn handle(
         }
         WM_MOUSELEAVE => {
             data.tracking.set(false);
-            crate::input::pointer(
-                surface,
-                mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
-            );
+            crate::chrome::pointer_left_region(surface, hwnd, true);
         }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN | WM_LBUTTONDBLCLK
         | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK | WM_XBUTTONDBLCLK => {
@@ -1549,15 +1546,35 @@ fn mouse_event(
 }
 
 /// The pointer moved over a view of the app's title bar that answers as
-/// the frame (`windowDrag`, `windowControl`) at `at` (client points), or
-/// left it (`None`): the views hear it as the client area's moves, for
-/// their hover styles.
-pub(crate) fn nc_pointer(surface: &Rc<Surface>, at: Option<(f32, f32)>) {
-    let event = match at {
-        Some((x, y)) => mouse_event(PointerKind::Move, x, y, 0, 0, 1, surface),
-        None => mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
-    };
-    crate::input::pointer(surface, event);
+/// the frame (`windowDrag`, `windowControl`) at `at` (client points) of
+/// window `hwnd`, or left it (`None`): the views hear it as the client
+/// area's moves, for their hover styles. A leave message's recheck
+/// ([`crate::chrome::pointer_left_region`]) reports where the pointer is
+/// the same way, also while the window holds the capture.
+pub(crate) fn nc_pointer(surface: &Rc<Surface>, hwnd: HWND, at: Option<(f32, f32)>) {
+    let held = data(hwnd).map_or(0, |d| d.buttons.get());
+    let (kind, x, y, buttons, clicks) = region_pointer(at, held);
+    crate::input::pointer(
+        surface,
+        mouse_event(kind, x, y, 0, buttons, clicks, surface),
+    );
+}
+
+/// What [`nc_pointer`] reports: a move at `at` with the buttons the window
+/// holds (`held`, as [`PointerEvent::buttons`] numbers them: a move without
+/// them would tell the views the drag's button went up), or a leave, which
+/// has neither a place nor buttons. Kind, x, y, buttons, clicks.
+fn region_pointer(at: Option<(f32, f32)>, held: u8) -> (PointerKind, f32, f32, u8, u32) {
+    match at {
+        Some((x, y)) => (PointerKind::Move, x, y, held, 1),
+        None => (PointerKind::Leave, -1.0, -1.0, 0, 0),
+    }
+}
+
+/// Window `hwnd`'s client area is tracked for `WM_MOUSELEAVE`: a client
+/// move was heard since the last one.
+pub(crate) fn client_tracked(hwnd: HWND) -> bool {
+    data(hwnd).is_some_and(|d| d.tracking.get())
 }
 
 /// Lines one wheel notch scrolls (the user's setting, 3 by default).
@@ -1892,6 +1909,30 @@ mod tests {
             assert!(ours(&heard).is_empty() && !moved(&heard), "{heard:?}");
             DestroyWindow(root).unwrap();
         }
+    }
+
+    #[test]
+    fn a_rechecked_move_keeps_the_buttons_the_window_holds() {
+        // Dragging with the left button across a drag region: the views
+        // hear the move with the button still down.
+        assert_eq!(
+            region_pointer(Some((12.0, 8.0)), 0b1),
+            (PointerKind::Move, 12.0, 8.0, 0b1, 1)
+        );
+        // The mask is the one presses build (`1 << button_of`), which is
+        // what a mouse message's own keys decode to.
+        let right = 1 << button_of(WM_RBUTTONDOWN, WPARAM(0));
+        assert_eq!(right, held_buttons(WPARAM(0x2)));
+        assert_eq!(region_pointer(Some((0.0, 0.0)), right).3, right);
+        // No button held, and a leave, as before.
+        assert_eq!(
+            region_pointer(Some((1.0, 2.0)), 0),
+            (PointerKind::Move, 1.0, 2.0, 0, 1)
+        );
+        assert_eq!(
+            region_pointer(None, 0b1),
+            (PointerKind::Leave, -1.0, -1.0, 0, 0)
+        );
     }
 
     #[test]
