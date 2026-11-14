@@ -38,6 +38,17 @@ prop id:card android.elevation 4
 prop id:plain elevation 0
 prop id:live android.accessibilityLiveRegion polite
 prop id:plain accessibilityLiveRegion none
+# A delegated switch keeps the same role/label and receives one app press per tap.
+# Native TalkBack event contents are covered by A11yStateEvents on a device.
+prop id:switch role switch
+prop id:switch accessibilityLabel Updates
+prop id:switch accessibilityState checked=false
+tap id:switch
+expect Changes: 1
+prop id:switch accessibilityState checked=true
+tap id:switch
+expect Changes: 2
+prop id:switch accessibilityState checked=false
 covers [props] android
 covers [props] android.ripple
 covers [props] android.elevation
