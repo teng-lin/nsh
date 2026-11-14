@@ -1096,10 +1096,7 @@ fn handle(
         }
         WM_MOUSELEAVE => {
             data.tracking.set(false);
-            crate::input::pointer(
-                surface,
-                mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
-            );
+            crate::chrome::pointer_left_region(surface, hwnd);
         }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN | WM_LBUTTONDBLCLK
         | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK | WM_XBUTTONDBLCLK => {
