@@ -710,9 +710,20 @@ pub(crate) fn pointer_left_region(surface: &Rc<Surface>, hwnd: HWND) {
             .ok()?;
         let scale = scale_of(surface, hwnd);
         let at = (p.x as f32 / scale, p.y as f32 / scale);
-        content_hit(code, caption_at(surface, hwnd, at.0, at.1).is_some()).then_some(at)
+        content_hit(code, caption_at(surface, hwnd, at.0, at.1).is_some())
+            .then_some((at, code))
     })();
-    crate::window::nc_pointer(surface, at);
+    if let Some(shell) = crate::window::shell(hwnd) {
+        restore_region_hover(&shell.view_hover, at.map(|(_, code)| code));
+    }
+    crate::window::nc_pointer(surface, at.map(|(position, _)| position));
+}
+
+// A queued leave can arrive after the pointer has returned to a drag region.
+// Preserve ownership of the next non-client leave, but client tracking takes
+// over when the recheck finds HTCLIENT.
+fn restore_region_hover(hover: &std::cell::Cell<bool>, content: Option<u32>) {
+    hover.set(content.is_some_and(|code| code != HTCLIENT));
 }
 
 fn content_hit(code: u32, drawn_caption: bool) -> bool {
@@ -726,6 +737,20 @@ fn content_hit(code: u32, drawn_caption: bool) -> bool {
 #[cfg(test)]
 mod pointer_tests {
     use super::*;
+
+    #[test]
+    fn delayed_leave_retains_cleanup_for_a_returned_drag_pointer() {
+        let hover = std::cell::Cell::new(true);
+        assert!(hover.replace(false)); // The queued non-client leave.
+        restore_region_hover(&hover, Some(HTCAPTION));
+        // The next border move must see retained ownership and send Leave.
+        assert!(hover.get());
+        hover.set(false);
+        restore_region_hover(&hover, None);
+        assert!(!hover.get());
+        restore_region_hover(&hover, Some(HTCLIENT));
+        assert!(!hover.get());
+    }
 
     #[test]
     fn drag_to_button_keeps_content_hover_but_border_and_system_caption_leave() {
