@@ -85,18 +85,20 @@ final class A11y extends View.AccessibilityDelegate {
 
     /** Notify only after the new delegate is installed: the service queries the new state. */
     void changed(View v, A11y before) {
-        if (before == null || hidden || before.hidden || !v.isShown()) return;
-        String description = stateDescription();
-        boolean descriptionChanged = !Objects.equals(description, before.stateDescription());
-        boolean rangeChanged = hasValue != before.hasValue || (hasValue && (
-                Float.compare(min, before.min) != 0 || Float.compare(max, before.max) != 0
-                        || Float.compare(now, before.now) != 0));
-        if (state == before.state && role == before.role && !descriptionChanged && !rangeChanged) return;
+        if (before == null || hidden || before.hidden) return;
+        boolean sameNumbers = Float.compare(min, before.min) == 0
+                && Float.compare(max, before.max) == 0 && Float.compare(now, before.now) == 0;
+        if (state == before.state && role == before.role && hasValue == before.hasValue
+                && Objects.equals(valueText, before.valueText) && sameNumbers) return;
+        if (!v.isShown()) return;
         AccessibilityManager manager = v.getContext().getSystemService(AccessibilityManager.class);
         if (manager == null || !manager.isEnabled()) return;
+        String description = stateDescription();
+        boolean descriptionChanged = !Objects.equals(description, before.stateDescription());
+        boolean rangeChanged = hasRange() && (!before.hasRange() || !sameNumbers);
 
         int feedback = A11yChanges.feedback(before.state, state, descriptionChanged,
-                description != null, rangeChanged);
+                description != null && Build.VERSION.SDK_INT >= 30, rangeChanged);
         if (v.isAccessibilityFocused() && feedback == A11yChanges.CHECKED_OR_SELECTED) {
             // TalkBack derives checked/selected feedback from this event, including an async
             // state change after ACTION_CLICK. A generic content change only invalidates its cache.
@@ -149,11 +151,9 @@ final class A11y extends View.AccessibilityDelegate {
         if ((state & 64) != 0) {
             info.addAction((state & 128) != 0 ? AccessibilityAction.ACTION_COLLAPSE : AccessibilityAction.ACTION_EXPAND);
         }
-        if (hasValue) {
-            if (valueText == null && !Float.isNaN(now) && !Float.isNaN(min) && !Float.isNaN(max)) {
-                info.setRangeInfo(AccessibilityNodeInfo.RangeInfo.obtain(
-                        AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT, min, max, now));
-            }
+        if (hasRange()) {
+            info.setRangeInfo(AccessibilityNodeInfo.RangeInfo.obtain(
+                    AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT, min, max, now));
         }
         String stateText = stateDescription();
         if (stateText != null && Build.VERSION.SDK_INT >= 30) info.setStateDescription(stateText);
@@ -172,6 +172,10 @@ final class A11y extends View.AccessibilityDelegate {
             String l = actionLabels[i] != null ? actionLabels[i] : actionNames[i];
             info.addAction(new AccessibilityAction(CUSTOM_ACTION_BASE + i, l));
         }
+    }
+
+    private boolean hasRange() {
+        return hasValue && valueText == null && !Float.isNaN(now) && !Float.isNaN(min) && !Float.isNaN(max);
     }
 
     private String stateDescription() {

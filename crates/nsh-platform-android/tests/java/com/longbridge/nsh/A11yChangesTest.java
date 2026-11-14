@@ -24,7 +24,11 @@ public final class A11yChangesTest {
         expect("disabled only invalidates cached node", 0, 1, false, false, false, A11yChanges.NONE);
         expect("irrelevant checked bits without checkable", 0, 16,
                 false, false, false, A11yChanges.NONE);
-        System.out.println("A11yChangesTest: 17 passed");
+        expect("checked with an unavailable description", 72, 216,
+                true, false, false, A11yChanges.CHECKED_OR_SELECTED);
+        expect("checked with an available description", 72, 216,
+                true, true, false, A11yChanges.DESCRIPTION);
+        System.out.println("A11yChangesTest: 19 passed");
     }
 
     private static void expect(String label, int before, int after, boolean descriptionChanged,

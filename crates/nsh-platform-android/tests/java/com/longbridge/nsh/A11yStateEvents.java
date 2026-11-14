@@ -36,6 +36,7 @@ public final class A11yStateEvents {
         expect("expanded", view, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
                 AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION);
         A11y low = state(0), high = state(0);
+        low.role = high.role = 8;
         low.hasValue = high.hasValue = true;
         low.min = high.min = 0; low.max = high.max = 10;
         low.now = 3; high.now = 4;
@@ -43,6 +44,15 @@ public final class A11yStateEvents {
         expect("range", view, AccessibilityEvent.TYPE_VIEW_SELECTED, 0);
         update(view, high, high);
         expect("unchanged range", view, 0, 0);
+        low.valueText = high.valueText = "four";
+        update(view, low, high);
+        expect("unexposed numeric values only invalidate the cache", view,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.CONTENT_CHANGE_TYPE_UNDEFINED);
+        low.valueText = high.valueText = null;
+        low.min = high.min = Float.NaN;
+        update(view, low, high);
+        expect("an invalid range only invalidates the cache", view,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.CONTENT_CHANGE_TYPE_UNDEFINED);
         view.focused = false;
         update(view, off, on);
         expect("an unfocused checkbox only invalidates the cache", view,
@@ -61,7 +71,7 @@ public final class A11yStateEvents {
             throw new AssertionError("event must report the same switch role and checked state as its node");
         }
         event.recycle();
-        System.out.println("A11yStateEvents: 12 passed");
+        System.out.println("A11yStateEvents: 14 passed");
         System.exit(0);
     }
 
