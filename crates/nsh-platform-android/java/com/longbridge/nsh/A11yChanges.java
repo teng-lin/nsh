@@ -6,6 +6,11 @@ final class A11yChanges {
 
     private A11yChanges() {}
 
+    static int exposedState(int state, boolean stateDescriptions) {
+        // Before API 30, mixed has no state description and reads as the ordinary checked flag.
+        return stateDescriptions ? state : state & ~(32 | 1024);
+    }
+
     static int feedback(int before, int after, boolean descriptionChanged,
                         boolean hasDescription, boolean rangeChanged) {
         if (descriptionChanged && hasDescription) return DESCRIPTION;

@@ -97,8 +97,10 @@ final class A11y extends View.AccessibilityDelegate {
         boolean descriptionChanged = !Objects.equals(description, before.stateDescription());
         boolean rangeChanged = hasRange() && (!before.hasRange() || !sameNumbers);
 
-        int feedback = A11yChanges.feedback(before.state, state, descriptionChanged,
-                description != null && Build.VERSION.SDK_INT >= 30, rangeChanged);
+        boolean stateDescriptions = Build.VERSION.SDK_INT >= 30;
+        int feedback = A11yChanges.feedback(A11yChanges.exposedState(before.state, stateDescriptions),
+                A11yChanges.exposedState(state, stateDescriptions), descriptionChanged,
+                description != null && stateDescriptions, rangeChanged);
         if (v.isAccessibilityFocused() && feedback == A11yChanges.CHECKED_OR_SELECTED) {
             // TalkBack derives checked/selected feedback from this event, including an async
             // state change after ACTION_CLICK. A generic content change only invalidates its cache.

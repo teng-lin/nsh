@@ -28,7 +28,16 @@ public final class A11yChangesTest {
                 true, false, false, A11yChanges.CHECKED_OR_SELECTED);
         expect("checked with an available description", 72, 216,
                 true, true, false, A11yChanges.DESCRIPTION);
-        System.out.println("A11yChangesTest: 19 passed");
+        expectBefore30("unchecked to unexposed mixed", 8, 40);
+        expectBefore30("unexposed mixed to unchecked", 40, 8);
+        expectBefore30("off to unexposed mixed toggle", 256, 1280);
+        expectBefore30("unexposed mixed toggle to off", 1280, 256);
+        System.out.println("A11yChangesTest: 23 passed");
+    }
+
+    private static void expectBefore30(String label, int before, int after) {
+        expect(label, A11yChanges.exposedState(before, false), A11yChanges.exposedState(after, false),
+                true, false, false, A11yChanges.DESCRIPTION);
     }
 
     private static void expect(String label, int before, int after, boolean descriptionChanged,
