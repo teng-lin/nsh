@@ -672,7 +672,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - **The client and the non-client area are tracked for leaves apart** (`TrackMouseEvent`'s `TME_LEAVE` without and
   with `TME_NONCLIENT`), and a view marked `windowDrag` or `windowControl` is non-client area inside the app's content
   (`HTCAPTION`, `HTCLOSE`, ...): moving between one and an ordinary view posts the leave of the area left, which
-  arrives after the other area's move. Taken as leaving the window, it cleared the hover that move had just set. A
+  can be handled after the other area's move. Taken as leaving the window, it clears the hover that move just set. A
   leave message therefore only asks where the pointer is now (`chrome::pointer_left_region`: `GetCursorPos`,
   `WindowFromPoint`, the window's own answer to `WM_NCHITTEST`, and the client rectangle, since the system's title bar
   answers `HTCAPTION` as a drag region does), and the views hear a move there or a leave. A leave message ends its
