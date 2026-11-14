@@ -22,6 +22,9 @@ use crate::{android::root, term};
 /// Where the repository is cloned from.
 const REPOSITORY: &str = "https://github.com/longbridge/nsh-compat.git";
 
+// This fork's API predates the harness's upstream input API changes.
+const REVISION: &str = include_str!("../../../tests/compat/harness.rev");
+
 pub(crate) fn compat(record: Option<&str>) -> anyhow::Result<()> {
     let root = root();
     let repo = checkout(&root)?;
@@ -64,19 +67,16 @@ fn checkout(root: &Path) -> anyhow::Result<PathBuf> {
     let dir = root.join("target/nsh-compat");
     std::fs::create_dir_all(&dir)?;
     let repo = dir.join("nsh-compat");
+    let mut update = true;
     if repo.join(".git").exists() {
         let status = Command::new("git")
             .current_dir(&repo)
             .args(["status", "--porcelain"])
             .output()
             .context("git status")?;
-        if status.stdout.is_empty() {
-            term::run(Command::new("git").current_dir(&repo).args([
-                "pull",
-                "--ff-only",
-                "--quiet",
-            ]))?;
-        } else {
+        anyhow::ensure!(status.status.success(), "git status failed for nsh-compat");
+        if !status.stdout.is_empty() {
+            update = false;
             term::warn(format!("{} has changes: used as it is", repo.display()));
         }
     } else {
@@ -84,6 +84,26 @@ fn checkout(root: &Path) -> anyhow::Result<PathBuf> {
             Command::new("git")
                 .args(["clone", "--quiet", REPOSITORY])
                 .arg(&repo),
+        )?;
+    }
+    if update {
+        let revision = REVISION.trim();
+        anyhow::ensure!(
+            revision.len() == 40
+                && revision
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+            "invalid compatibility harness revision"
+        );
+        term::run(
+            Command::new("git")
+                .current_dir(&repo)
+                .args(["fetch", "--quiet", "origin", revision]),
+        )?;
+        term::run(
+            Command::new("git")
+                .current_dir(&repo)
+                .args(["checkout", "--detach", "--quiet", revision]),
         )?;
     }
     let link = dir.join("nsh");
