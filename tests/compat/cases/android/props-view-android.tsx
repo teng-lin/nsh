@@ -2,9 +2,11 @@
 // every element inside `android={{…}}`, on Android (the script's
 // platform): `ripple`, `elevation` and `accessibilityLiveRegion`. Its script
 // checks each.
-import { View } from "nsh";
+import { Text, View, signal } from "nsh";
 
 function App() {
+  const checked = signal(false);
+  const changes = signal(0);
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <View
@@ -20,6 +22,19 @@ function App() {
       />
       <View testID="live" android={{ accessibilityLiveRegion: "polite" }} style={{ height: 40 }} />
       <View testID="plain" style={{ height: 40 }} />
+      <View
+        testID="switch"
+        role="switch"
+        accessibilityLabel="Updates"
+        accessibilityState={{ checked: checked() }}
+        onPress={() => {
+          checked.set(!checked());
+          changes.set(changes() + 1);
+        }}
+        style={{ height: 40 }}
+      >
+        <Text>{`Changes: ${changes()}`}</Text>
+      </View>
     </View>
   );
 }

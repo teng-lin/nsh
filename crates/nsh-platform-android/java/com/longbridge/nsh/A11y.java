@@ -3,8 +3,11 @@ package com.longbridge.nsh;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction;
+import java.util.Objects;
 
 /**
  * Accessibility of one view, from the app's properties
@@ -80,6 +83,50 @@ final class A11y extends View.AccessibilityDelegate {
         if (Build.VERSION.SDK_INT >= 28) v.setAccessibilityHeading(role == ROLE_HEADER);
     }
 
+    /** Notify only after the new delegate is installed: the service queries the new state. */
+    void changed(View v, A11y before) {
+        if (before == null || hidden || before.hidden) return;
+        boolean sameNumbers = Float.compare(min, before.min) == 0
+                && Float.compare(max, before.max) == 0 && Float.compare(now, before.now) == 0;
+        if (state == before.state && role == before.role && hasValue == before.hasValue
+                && Objects.equals(valueText, before.valueText) && sameNumbers) return;
+        if (!v.isShown()) return;
+        AccessibilityManager manager = v.getContext().getSystemService(AccessibilityManager.class);
+        if (manager == null || !manager.isEnabled()) return;
+        String description = stateDescription();
+        boolean descriptionChanged = !Objects.equals(description, before.stateDescription());
+        boolean rangeChanged = hasRange() && (!before.hasRange() || !sameNumbers);
+
+        boolean stateDescriptions = Build.VERSION.SDK_INT >= 30;
+        int feedback = A11yChanges.feedback(A11yChanges.exposedState(before.state, stateDescriptions),
+                A11yChanges.exposedState(state, stateDescriptions), descriptionChanged,
+                description != null && stateDescriptions, rangeChanged);
+        if (v.isAccessibilityFocused() && feedback == A11yChanges.CHECKED_OR_SELECTED) {
+            // TalkBack derives checked/selected feedback from this event, including an async
+            // state change after ACTION_CLICK. A generic content change only invalidates its cache.
+            v.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
+        } else if (v.isAccessibilityFocused() && feedback == A11yChanges.RANGE) {
+            v.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SELECTED);
+        } else {
+            AccessibilityEvent event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+            event.setContentChangeTypes(feedback == A11yChanges.DESCRIPTION && Build.VERSION.SDK_INT >= 30
+                    ? AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION
+                    : AccessibilityEvent.CONTENT_CHANGE_TYPE_UNDEFINED);
+            v.sendAccessibilityEventUnchecked(event);
+        }
+    }
+
+    @Override
+    public void onInitializeAccessibilityEvent(View host, AccessibilityEvent event) {
+        super.onInitializeAccessibilityEvent(host, event);
+        String className = (state & 256) != 0 ? "android.widget.ToggleButton"
+                : role < CLASS_NAMES.length ? CLASS_NAMES[role] : null;
+        if (className != null) event.setClassName(className);
+        if ((state & 1) != 0) event.setEnabled(false);
+        if ((state & 256) != 0) event.setChecked((state & 512) != 0);
+        else if ((state & 8) != 0) event.setChecked((state & 16) != 0);
+    }
+
     @Override
     public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
         super.onInitializeAccessibilityNodeInfo(host, info);
@@ -93,42 +140,25 @@ final class A11y extends View.AccessibilityDelegate {
         if (testId != null) info.setViewIdResourceName(testId);
         if ((state & 1) != 0) info.setEnabled(false);
         if ((state & 2) != 0) info.setSelected(true);
-        StringBuilder stateText = new StringBuilder();
         if ((state & 8) != 0) {
             info.setCheckable(true);
             info.setChecked((state & 16) != 0);
-            if ((state & 32) != 0) stateText.append("mixed");
         }
         if ((state & 256) != 0) {
             // A toggle button (`accessibilityState.pressed`), read as on or off.
             info.setClassName("android.widget.ToggleButton");
             info.setCheckable(true);
             info.setChecked((state & 512) != 0);
-            if ((state & 1024) != 0) {
-                if (stateText.length() > 0) stateText.append(", ");
-                stateText.append("mixed");
-            }
         }
         if ((state & 64) != 0) {
-            if (stateText.length() > 0) stateText.append(", ");
-            stateText.append((state & 128) != 0 ? "expanded" : "collapsed");
             info.addAction((state & 128) != 0 ? AccessibilityAction.ACTION_COLLAPSE : AccessibilityAction.ACTION_EXPAND);
         }
-        int current = (state >> 11) & 7;
-        if (current != 0 && current < CURRENT_DESCRIPTIONS.length) {
-            if (stateText.length() > 0) stateText.append(", ");
-            stateText.append(CURRENT_DESCRIPTIONS[current]);
+        if (hasRange()) {
+            info.setRangeInfo(AccessibilityNodeInfo.RangeInfo.obtain(
+                    AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT, min, max, now));
         }
-        if (hasValue) {
-            if (valueText != null) {
-                if (stateText.length() > 0) stateText.append(", ");
-                stateText.append(valueText);
-            } else if (!Float.isNaN(now) && !Float.isNaN(min) && !Float.isNaN(max)) {
-                info.setRangeInfo(AccessibilityNodeInfo.RangeInfo.obtain(
-                        AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT, min, max, now));
-            }
-        }
-        if (stateText.length() > 0 && Build.VERSION.SDK_INT >= 30) info.setStateDescription(stateText);
+        String stateText = stateDescription();
+        if (stateText != null && Build.VERSION.SDK_INT >= 30) info.setStateDescription(stateText);
         if (role == ROLE_ADJUSTABLE || has("increment")) info.addAction(AccessibilityAction.ACTION_SCROLL_FORWARD);
         if (role == ROLE_ADJUSTABLE || has("decrement")) info.addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD);
         if (has("activate") || mounter.wants(id, Native.PRESS)) {
@@ -144,6 +174,33 @@ final class A11y extends View.AccessibilityDelegate {
             String l = actionLabels[i] != null ? actionLabels[i] : actionNames[i];
             info.addAction(new AccessibilityAction(CUSTOM_ACTION_BASE + i, l));
         }
+    }
+
+    private boolean hasRange() {
+        return hasValue && valueText == null && !Float.isNaN(now) && !Float.isNaN(min) && !Float.isNaN(max);
+    }
+
+    private String stateDescription() {
+        StringBuilder text = new StringBuilder();
+        if ((state & 8) != 0 && (state & 32) != 0) text.append("mixed");
+        if ((state & 256) != 0 && (state & 1024) != 0) {
+            if (text.length() > 0) text.append(", ");
+            text.append("mixed");
+        }
+        if ((state & 64) != 0) {
+            if (text.length() > 0) text.append(", ");
+            text.append((state & 128) != 0 ? "expanded" : "collapsed");
+        }
+        int current = (state >> 11) & 7;
+        if (current != 0 && current < CURRENT_DESCRIPTIONS.length) {
+            if (text.length() > 0) text.append(", ");
+            text.append(CURRENT_DESCRIPTIONS[current]);
+        }
+        if (hasValue && valueText != null) {
+            if (text.length() > 0) text.append(", ");
+            text.append(valueText);
+        }
+        return text.length() == 0 ? null : text.toString();
     }
 
     @Override

@@ -1643,8 +1643,10 @@ final class Mounter {
         }
         if (v instanceof InputBox) ((InputBox) v).pointerEvents = pointerEvents;
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
+        A11y before = a11y.get(id);
         a11y.put(id, a);
         a.apply(v);
+        a.changed(v, before);
         if (v instanceof ScrollBox) keyScroll((ScrollBox) v, nativeId);
     }
 
