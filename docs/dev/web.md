@@ -761,7 +761,10 @@ browsers' touches into what phones report:
   without modifiers, else the US character of its `code` — never the raw logical string or a character guessed
   from the DOM code, so named End and an unmodified AZERTY `z` match what the page reported. The core first
   answers whether the focused view's logical ancestry (an overlay's content included, whatever its DOM ancestry)
-  hears raw keys or captures any (`nsh_key_interest`); only then does the page build the event. The core reads the
+  hears raw keys or captures any (`nsh_key_interest`); only then does the page build the event. With nothing
+  focused (the page's body has the focus and the player takes the keys) the root view stands for the focus: the core
+  answers for and routes to the app's root view, or the dialog shown over it (`Core::key_target`), and captures
+  nothing there. The core reads the
   mounted rules of the focused view and its enabled ancestors up to its window root, before any browser default,
   and routes ONE event through its common bubbling to that view and its ancestors — for both the press and its
   release, with `defaultPrevented` set anew for each. A transition the policy takes produces no browser default

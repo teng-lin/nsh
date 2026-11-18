@@ -8917,10 +8917,15 @@ class Player {
 
   /** The view that holds the keyboard focus in this player, when it is a
    * view of the app's and not a native field, page or video, which keeps
-   * its own keys. */
+   * its own keys. With nothing focused (the page's body has the focus and
+   * this player takes the keys) it is the root view: the core hands its
+   * keys to the app's root view, or the dialog shown over it
+   * (`Core::key_target`), as a browser targets `document.body`; the root
+   * captures nothing. */
   keyFocusView() {
     const focus = document.activeElement;
-    if (!focus || focus === document.body || !this.root.contains(focus)) return null;
+    if (!focus || focus === document.body) return this.takesKeys() ? this.root : null;
+    if (!this.root.contains(focus)) return null;
     if (focus.isContentEditable || focus.closest?.(".nsh-field, [contenteditable], iframe, video")) return null;
     return this.viewOf(focus);
   }

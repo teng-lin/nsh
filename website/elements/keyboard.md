@@ -204,8 +204,9 @@ The height is the part of the keyboard that overlaps the NSH surface. When the w
 ## Hardware keys on custom views
 
 A focused view hears the hardware key transitions its platform reports: `onKeyDown` / `onKeyUp` in TSX, or
-`on_key_down` / `on_key_up` in Rust. This suits a custom-rendered canvas or embedded interaction surface. Named
-shortcuts use `on_key` / `on_key_with`; text editing uses `Input`, and terminal sessions use `Terminal`.
+`on_key_down` / `on_key_up` in Rust; with nothing focused, the app's root view hears the window's keys. This suits a
+custom-rendered canvas or embedded interaction surface. Named shortcuts use `on_key` / `on_key_with`; text editing
+uses `Input`, and terminal sessions use `Terminal`.
 
 `KeyEvent` reports what the source actually gives:
 
@@ -221,6 +222,40 @@ Both listeners return nothing. One platform event on the focused view bubbles to
 within the same native window, once each, for `onKeyDown` and `onKeyUp` alike. A real release the source reports
 reaches the focused view even when its press went elsewhere, as the DOM's does; losing the window's focus clears
 held state and invents no releases.
+
+While nothing in a window has the focus, the app's root view in that window hears the window's keys: the first
+top-level view `mount` rendered (a Rust app's root component, a window's content), or the dialog shown over the
+window. It hears them as a focused view would, and they bubble from there, as the DOM's `keydown` goes to
+`document.body` when no element has the focus. The app's shortcuts take their keys first. So a listener on the app's
+root view hears the keys of the focused views inside it and, while nothing has the focus, the window's keys; a focused
+text input, web view or native component keeps its keys, and a release goes where the focus is when it comes. Render
+one view at the top that holds the whole app (around a `NavStack`, too) and put the listeners on it: with several
+top-level views, the first one hears the keys.
+
+Capture rules take keys from a focused view and its ancestors: a key heard with nothing focused reports
+`defaultPrevented: false`, a `captureKeys` rule of the root view takes nothing then, and the platform's default
+still runs, so Tab moves the focus into the app. Bind a key the app keeps in that state with `keymap`.
+
+```tsx
+import { mount, signal, Text, View } from "nsh";
+
+function Game() {
+  const held = signal<string[]>([]);
+  // `code` is "" where the source reports no physical key.
+  const name = (e: { code: string; key: string }) => e.code || e.key;
+  return (
+    <View
+      style={{ flex: 1 }}
+      onKeyDown={(e) => !e.repeat && held.update((keys) => [...keys, name(e)])}
+      onKeyUp={(e) => held.update((keys) => keys.filter((key) => key !== name(e)))}
+    >
+      <Text>{`Held: ${held().join(" ") || "nothing"}`}</Text>
+    </View>
+  );
+}
+
+mount(Game);
+```
 
 The same typed props apply to host elements such as `Scroll`, `List` and `Overlay`. A listener or capture rule on
 one of these ancestors follows the focused descendant's logical ancestry, including children rendered in overlays.

@@ -54,7 +54,11 @@ final class KeyDispatch {
     private final Mounter mounter;
     /** The window's view tree, whose focus is the keyboard's ({@code NshView}'s root or a modal's container). */
     private final View root;
-    /** The node a key goes to when nothing in this window has a focus ({@code ROOT_ID} or a modal's id). */
+    /**
+     * The node a key goes to when nothing in this window has a focus ({@code ROOT_ID} or a
+     * modal's id): the key is reported there whatever it listens to, and the core hands a
+     * {@code ROOT_ID} key to the app's root view ({@code Core::key_target}).
+     */
     private final int fallback;
     /**
      * The keys whose press moved the managed focus (Tab, or an arrow into
@@ -283,13 +287,17 @@ final class KeyDispatch {
             if (e.isCanceled()) return Native.keyCancel(mounter.handle(), code);
             // The release uses the current focus, listeners and capture
             // rules, not what its down happened to do.
-            boolean raw = node > 0 && mounter.keyListens(node, fallback);
-            boolean prevented = raw && mounter.keyCaptured(node, fallback, e);
+            boolean raw = RawKeys.reported(node, fallback, () -> mounter.keyListens(node, fallback));
+            boolean prevented = RawKeys.prevented(raw, node, fallback,
+                    () -> mounter.keyCaptured(node, fallback, e));
             return Native.keyUp(mounter.handle(), code, unicode, text, meta, scan, node,
                     prevented, raw);
         }
-        boolean raw = node > 0 && mounter.keyListens(node, fallback);
-        boolean prevented = raw && mounter.keyCaptured(node, fallback, e);
+        // Nothing in the window has the focus (`node` is its fallback): the
+        // key always goes there and no capture rule takes it (`RawKeys`).
+        boolean raw = RawKeys.reported(node, fallback, () -> mounter.keyListens(node, fallback));
+        boolean prevented = RawKeys.prevented(raw, node, fallback,
+                () -> mounter.keyCaptured(node, fallback, e));
         return Native.keyDown(mounter.handle(), code, unicode, text, meta, scan,
                 e.getRepeatCount() > 0, editing, node, fallback, mounter.control(node),
                 prevented, raw);

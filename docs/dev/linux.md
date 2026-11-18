@@ -197,7 +197,11 @@ capture phase made for this transition; the listener runs later, on the app's fr
 and cannot veto a key whose default already ran or is about to run. Notifications are focus-scoped and use the
 mounted rule when each phase arrives: `KeyDown` and `KeyUp` reach listening, enabled ancestors within the native
 window, and a release goes to the view focused when the source reports it, even if another view (or a popup) heard
-the press. Keyboard ancestry follows the internal `ViewProps::key_parent` routing override when a portaled
+the press. With nothing focused in the window (GTK focuses no widget, or only the root view), both phases go to the
+window's root node after the app's shortcuts, which run once as for a raw view (`keymap::raw`: a consuming binding
+takes the key, a passing one reports first; `key_focus::unfocused_root`, `keyboard::notify_root`), uncaptured, and
+the core hands them to the app's root view there (`Core::key_target`). Keyboard ancestry follows the internal
+`ViewProps::key_parent` routing override when a portaled
 `Overlay` sets it, not the native `Insert` parent the core placed it under; interest and capture both use that
 logical parent, while focus, hit testing and layout keep the native one. No original down target is retained, a
 focus move is no release, and a window deactivation clears held state without emitting a synthetic key up. Native

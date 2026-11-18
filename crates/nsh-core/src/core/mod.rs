@@ -6662,6 +6662,14 @@ impl<M: TextEngine> Core<M> {
         {
             return Err(ApplyError::BadAnchor(self.nodes[b as usize].id));
         }
+        // A dialog inserted (made earlier, or moved) shows over those shown
+        // before it: `roots` keeps that order for `Core::key_target`.
+        if self.nodes[child as usize].kind == Kind::Modal
+            && let Some(at) = self.roots.iter().position(|&k| k == child)
+        {
+            let dialog = self.roots.remove(at);
+            self.roots.push(dialog);
+        }
 
         // Detach from the current position. A native view that stays visible
         // is moved by the insert below, so only emit a remove when the new

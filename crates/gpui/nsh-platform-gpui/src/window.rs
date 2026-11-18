@@ -239,8 +239,27 @@ pub(crate) fn entered(surface: &Surface) -> Option<NodeId> {
 /// app's own that shows: its input goes nowhere, and that window comes to
 /// the front.
 pub(crate) fn blocked(surface: &Surface, root: Option<NodeId>, cx: &mut App) -> bool {
+    let Some(modal) = modal_over(surface, root) else {
+        return false;
+    };
+    if let Some(handle) = modal.handle.get() {
+        let _ = handle.update(cx, |_, window, cx| activate_window(window, cx));
+    }
+    true
+}
+
+/// Whether window `root` (none: the main one) is under a modal window of
+/// the app's own that shows, as [`blocked`] answers, without bringing that
+/// window to the front.
+pub(crate) fn under_modal(surface: &Surface, root: Option<NodeId>) -> bool {
+    modal_over(surface, root).is_some()
+}
+
+/// The newest modal window of the app's own shown over window `root`
+/// (none: the main one).
+fn modal_over(surface: &Surface, root: Option<NodeId>) -> Option<Rc<AppWindow>> {
     let owner = root.unwrap_or(ROOT_ID);
-    let modal = surface
+    surface
         .windows
         .borrow()
         .iter()
@@ -248,14 +267,7 @@ pub(crate) fn blocked(surface: &Surface, root: Option<NodeId>, cx: &mut App) -> 
         .find(|w| {
             w.modal && w.shown.get() && !w.hidden.get() && w.parent.unwrap_or(ROOT_ID) == owner
         })
-        .cloned();
-    let Some(modal) = modal else {
-        return false;
-    };
-    if let Some(handle) = modal.handle.get() {
-        let _ = handle.update(cx, |_, window, cx| activate_window(window, cx));
-    }
-    true
+        .cloned()
 }
 
 /// The user may move window `root` (none: the main one) by its

@@ -88,7 +88,7 @@ nsh run App.tsx --target tui --points-per-cell 10x20
 没有绑定接收的 Ctrl 快捷键会再作为 Cmd 匹配一次，菜单和提示（`keymap.label`、`Command`）也把这些快捷键显示为 Ctrl，
 即在这里要按的键（`mod+o` 显示为 `⌃O`）。
 
-**原始按键事件。** 与桌面一致，获得焦点的自定义视图也能直接听到按键：`onKeyDown` / `onKeyUp`（Rust 视图的
+**原始按键事件。** 与桌面一致，获得焦点的自定义视图也能直接听到按键（没有视图获得焦点时由应用的根视图接收，且不被任何捕获规则拿走）：`onKeyDown` / `onKeyUp`（Rust 视图的
 `on_key_down` / `on_key_up`）收到 `KeyEvent`，其中 `key` 是终端报告的逻辑按键（`a`、`A`、`ArrowLeft`、`Enter`），
 并带有终端报告的 `modifiers` 和 `repeat`。`code` 始终为空：终端不报告硬件按键身份，宿主也绝不根据按键输入的字符推断。
 `defaultPrevented` 是捕获规则（`capture_keys`）的决定，与应用 keymap 使用同一套规范快捷键匹配；被捕获的按键会被标记，

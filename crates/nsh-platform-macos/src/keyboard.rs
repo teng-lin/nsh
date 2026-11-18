@@ -29,6 +29,13 @@
 //! [`KeyEvent`] and takes the existing path. Fields, hosted views, menus
 //! and OS-reserved shortcuts keep their own keys.
 //!
+//! With nothing focused in a window (its root view, or in a window NSH
+//! fills the window itself, is the first responder), both transitions
+//! and the modifier keys' go to the window's root node ([`unfocused`]),
+//! after the app's keymap: the core hands them to the app's root view in
+//! that window (`Core::key_target`). No capture rule takes them, so the
+//! menu's key equivalents and the responder's defaults still run.
+//!
 //! Interest and capture follow the logical keyboard ancestry, not the
 //! native view tree: an `Overlay` is moved under a root view's host
 //! natively while its logical parent stays the view that contains it, and
@@ -62,7 +69,8 @@ use std::{
 
 use block2::RcBlock;
 use nsh_core::{
-    EventKind, EventPayload, KeyEvent, ROOT_ID, element::SharedString, platform::InputModality,
+    EventKind, EventPayload, KeyEvent, NodeId, ROOT_ID, element::SharedString,
+    platform::InputModality,
 };
 use objc2::{rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSView};
@@ -176,6 +184,7 @@ fn press(surface: &Rc<Surface>, event: &NSEvent) -> bool {
 pub(crate) fn key_down(surface: &Surface, event: &NSEvent) -> bool {
     reconcile(surface, event.modifierFlags(), None);
     let Some(view) = focused(surface, event) else {
+        unfocused_key(surface, event, EventKind::KeyDown, Phase::Down);
         return false;
     };
     if !listens(surface, &view) || seen(surface, event) {
@@ -197,6 +206,7 @@ pub(crate) fn key_down(surface: &Surface, event: &NSEvent) -> bool {
 pub(crate) fn key_up(surface: &Surface, event: &NSEvent) -> bool {
     reconcile(surface, event.modifierFlags(), None);
     let Some(view) = focused(surface, event) else {
+        unfocused_key(surface, event, EventKind::KeyUp, Phase::Up);
         return false;
     };
     if !listens(surface, &view) || seen(surface, event) {
@@ -233,22 +243,27 @@ pub(crate) fn flags_changed(surface: &Surface, event: &NSEvent) {
     let Some((name, down)) = transition else {
         return;
     };
-    let Some(view) = focused(surface, event) else {
-        return;
-    };
-    if !listens(surface, &view) {
-        return;
-    }
     let mut key = KeyEvent::default();
     key.key = SharedString::new_static(name);
     key.code = SharedString::new_static(dom_code(event.keyCode()));
     key.modifiers = crate::input::modifiers(event.modifierFlags());
-    key.default_prevented = captures(surface, &view, event);
     let kind = if down {
         EventKind::KeyDown
     } else {
         EventKind::KeyUp
     };
+    let Some(view) = focused(surface, event) else {
+        // Nothing has the focus: the window's root hears the modifier
+        // (uncaptured), as it hears the other keys.
+        if let Some(root) = unfocused(surface, event) {
+            notify_at(surface, root, kind, key);
+        }
+        return;
+    };
+    if !listens(surface, &view) {
+        return;
+    }
+    key.default_prevented = captures(surface, &view, event);
     notify(surface, &view, kind, key);
 }
 
@@ -304,6 +319,58 @@ fn focused(surface: &Surface, event: &NSEvent) -> Option<NshView> {
         return None;
     }
     Some(view)
+}
+
+/// The root node of the event's window when nothing in it has the
+/// keyboard focus: the window's root view is its first responder (where a
+/// blur, a dismissed field or the app's start leave it), or the window
+/// itself is, in a window NSH fills (a window of the app's own, the
+/// standalone runner's). The
+/// key then goes to that root, and the core hands it to the app's root
+/// view in that window (`Core::key_target`). A field's editor, a hosted
+/// view, a host app's own responder (an embedding app's window), a blocked
+/// window and another surface's window keep their keys: `None`.
+fn unfocused(surface: &Surface, event: &NSEvent) -> Option<NodeId> {
+    let window = event.window(surface.mtm)?;
+    let root = crate::window::root_in(surface, &window)?;
+    let own = root.ns() != surface.root.ns();
+    if crate::window::blocked(surface, own.then_some(&root)) {
+        return None;
+    }
+    // NSH fills the window (a window of the app's own, or the standalone
+    // runner's main window: the root sits in a container that is the
+    // content view), so the window itself holding the keyboard (a focused
+    // view was removed, `input.rs`) is nothing focused. In a host app's
+    // window that is the host's state.
+    let fills = || own || surface.standalone.get();
+    let nothing = match window.firstResponder() {
+        None => fills(),
+        Some(responder) => match responder.downcast_ref::<NSView>() {
+            Some(ns) => std::ptr::addr_eq(ns, root.ns()),
+            None => std::ptr::addr_eq(&*responder, &*window) && fills(),
+        },
+    };
+    nothing.then(|| root.id())
+}
+
+/// Reports a key of a window with nothing focused at the window's root
+/// ([`unfocused`]), once (the monitor's, or the responder's own call): the
+/// core hands it to the app's root view. No capture rule takes it (they
+/// take keys from a focused view), so the defaults still run.
+fn unfocused_key(surface: &Surface, event: &NSEvent, kind: EventKind, phase: Phase) {
+    let Some(root) = unfocused(surface, event) else {
+        return;
+    };
+    if seen(surface, event) {
+        return;
+    }
+    if kind == EventKind::KeyDown {
+        // Before the key acts: the focus it moves shows (`focus-visible:`).
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
+    let key = key_event(event, phase);
+    remember(surface, event);
+    notify_at(surface, root, kind, key);
 }
 
 /// The next view up the keyboard ancestry: the logical parent the core
@@ -703,7 +770,12 @@ fn reconcile(surface: &Surface, flags: NSEventModifierFlags, except: Option<u16>
 /// Reports `key` at `view` (the engine bubbles it to the ancestors) as
 /// `kind`.
 fn notify(surface: &Surface, view: &NshView, kind: EventKind, key: KeyEvent) {
-    let id = view.id();
+    notify_at(surface, view.id(), kind, key);
+}
+
+/// Reports `key` at node `id` (a focused view, or a window's root with
+/// nothing focused) as `kind`.
+fn notify_at(surface: &Surface, id: NodeId, kind: EventKind, key: KeyEvent) {
     if !key.default_prevented {
         log::debug!(
             target: "nsh::keyboard",

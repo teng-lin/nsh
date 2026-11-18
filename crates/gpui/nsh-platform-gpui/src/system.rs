@@ -2951,6 +2951,16 @@ pub(crate) fn dialog_point(
     }
 }
 
+/// Whether a dialog (`AlertDialog`) shows over the app: it takes every
+/// key.
+pub(crate) fn dialog_shown(surface: &Surface) -> bool {
+    OVERLAYS.with(|o| {
+        o.borrow().iter().any(|o| {
+            matches!(&o.kind, OverlayKind::Dialog(d) if o.key == surface.key() && !d.closing.get())
+        })
+    })
+}
+
 /// Keys while a dialog shows over the app (it is modal: every key goes to
 /// it). Enter and Space press the focused button (the default action at
 /// first), Escape cancels, Tab and the arrows move between the buttons.

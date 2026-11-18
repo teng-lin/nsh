@@ -400,8 +400,12 @@ layout's only where the layout types no ASCII), so a rule written as `shift+a` c
 nothing; a rule mounted on an ancestor applies to a focused descendant. A captured key still reaches the focused view
 and, through the engine, its enabled listening ancestors; the native default does not run. One event per transition is
 sent to the focused view; the engine bubbles `KeyDown` and `KeyUp` to the ancestors, so the platform never sends to each
-of them. Built with `dev`, Cmd+R is never captured: as the keymap leaves it, the raw keys let the dev host's reload
-monitor have it.
+of them. With nothing focused in the window (its root view is the first responder, or the window itself is in a
+window NSH fills: a window of the app's own, the standalone runner's, where a removed focused view leaves the window
+the first responder), a key and a modifier's transition go to the window's root node (`keyboard::unfocused`),
+uncaptured, and the core hands them to the app's root view there (`Core::key_target`); an embedding app's own
+responder keeps its keys. Built with `dev`, Cmd+R is never captured: as the keymap leaves it, the raw keys let the
+dev host's reload monitor have it.
 
 Modifier keys do not produce `keyDown`/`keyUp`: AppKit sends `flagsChanged` with the modifier's virtual key code and the
 flags after the transition. Each change is reported as a named `KeyDown`/`KeyUp` (`Shift`, `Control`, `Alt`, `Meta`,

@@ -1156,10 +1156,13 @@ impl AppView {
 
     /// Where a raw transition goes — the focused view — and whether the
     /// mounted capture rules of its enabled ancestry take it, read now.
-    /// `None` when no view has the keyboard focus, when none of them and no
-    /// ancestor hears raw keys or captures them, or when a native control
-    /// owns the keys: a capture rule around a text field or the Minibuffer
-    /// must not intercept what is typed into them.
+    /// With no view focused it goes to the root ([`nsh_core::ROOT_ID`]),
+    /// uncaptured: the core hands it to the app's root view, or the dialog
+    /// shown over it (`Core::key_target`), and the terminal's defaults
+    /// still run. `None` when the focused view and its ancestors neither
+    /// hear raw keys nor capture them, or when a native control owns the
+    /// keys: a capture rule around a text field or the Minibuffer must not
+    /// intercept what is typed into them.
     fn raw_target(
         &self,
         stroke: Option<&nsh_core::keymap::Keystroke>,
@@ -1167,7 +1170,9 @@ impl AppView {
         if self.minibuffer.is_open() || self.editing_field().is_some() {
             return None;
         }
-        let id = key_event::target(&self.tree, self.keyboard.focused)?;
+        let Some(id) = key_event::target(&self.tree, self.keyboard.focused) else {
+            return Some((nsh_core::ROOT_ID, false));
+        };
         if !key_event::listens(&self.tree, id) {
             return None;
         }

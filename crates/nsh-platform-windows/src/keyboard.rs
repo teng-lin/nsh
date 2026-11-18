@@ -33,6 +33,12 @@
 //! restamped, so a character queued around the key keeps its place and
 //! its delivery.
 //!
+//! With nothing focused in a window (no custom view and no text field),
+//! both transitions go to the window's root node, after the app's keymap:
+//! the core hands them to the app's root view in that window
+//! (`Core::key_target`). No capture rule takes them, so the menu's
+//! shortcuts and the defaults (Tab's traversal) still run.
+//!
 //! Focus is per native window (the main window's root, or the root of a
 //! window of the app's own): a window in the background keeps its view, and
 //! the keys of the window in front only reach its own. A modal presented
@@ -824,6 +830,7 @@ fn core_event(event: &KeyEvent, down: bool, default_prevented: bool) -> nsh_core
 pub(crate) fn press(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool {
     let window = surface.input_root().id();
     let Some(view) = focused_in(surface, window) else {
+        unfocused_key(surface, window, event);
         return false;
     };
     if !listens(surface, &view) {
@@ -962,6 +969,7 @@ fn opens_context_menu(event: &KeyEvent) -> bool {
 pub(crate) fn release(surface: &std::rc::Rc<Surface>, event: &KeyEvent) {
     let window = surface.input_root().id();
     let Some(view) = focused_in(surface, window) else {
+        unfocused_key(surface, window, event);
         return;
     };
     if !listens(surface, &view) {
@@ -976,6 +984,33 @@ pub(crate) fn release(surface: &std::rc::Rc<Surface>, event: &KeyEvent) {
     let captured = captures(surface, &view, stroke.as_ref());
     let key = core_event(event, false, captured);
     surface.event(view.id(), EventKind::KeyUp, EventPayload::Key(key));
+}
+
+/// Whether nothing in window `window` (its root node) has the keyboard
+/// focus: no custom view (the caller found none) and no text field of
+/// that window, with no dialog over the app owning the keyboard.
+fn unfocused(surface: &Surface, window: NodeId) -> bool {
+    !crate::system::dialog_shown(surface)
+        && crate::text_input::focused(surface)
+            .is_none_or(|field| window_of(surface, &field) != window)
+}
+
+/// A key of window `window` with nothing focused: reported at the window's
+/// root node, which the core hands to the app's root view there
+/// (`Core::key_target`). No capture rule takes it (they take keys from a
+/// focused view), so the menu's shortcuts and the defaults still run.
+fn unfocused_key(surface: &Surface, window: NodeId, event: &KeyEvent) {
+    // An edit menu item's key is the focused field's, not a key the user
+    // pressed: with no field, no view hears it.
+    if surface.input.menu_key.get() || !unfocused(surface, window) {
+        return;
+    }
+    let (kind, key) = if event.down {
+        (EventKind::KeyDown, core_event(event, true, false))
+    } else {
+        (EventKind::KeyUp, core_event(event, false, false))
+    };
+    surface.event(window, kind, EventPayload::Key(key));
 }
 
 /// A key down that a mounted capture consumes must not be translated into

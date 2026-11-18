@@ -243,7 +243,10 @@ presses, `ViewProps::focus_stop`) takes the keyboard focus with Tab / Shift+Tab 
 the newest dialog of the window the input is in — a click (the view or its nearest focusable ancestor), `ref.focus()`
 / `blur()`, or UI Automation's `SetFocus`. While it has it, every `WM_KEYDOWN` / `WM_KEYUP` becomes a
 `nsh_core::KeyEvent` (`KeyDown` / `KeyUp`) dispatched at that view, which the engine bubbles to enabled listening
-ancestors within the same window:
+ancestors within the same window. With nothing focused in the window (no custom view and no field of it, no dialog
+over the app), the event goes to the window's root node, uncaptured, after the app's keymap (an edit menu item's
+synthesized press, `Input::menu_key`, is no key the user pressed and reaches no view then), and the core hands it to
+the app's root view there (`Core::key_target`):
 
 - `key` is the current layout's logical key as DOM's `KeyboardEvent.key` names it: DOM spellings for named keys
   (`Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `ArrowLeft`, `F5`, `Shift`, `Control`, `Alt`, `Meta`, ...), the

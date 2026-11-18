@@ -1397,14 +1397,15 @@ fn a_captured_tab_moves_no_focus_and_marks_the_key_and_its_release() {
     view.load(App::Rust(Root::new::<CapturedTabPage>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focused false false");
-    // Ctrl+N takes the first stop's focus; no view had it before, so the
-    // key was no view's to hear.
-    view.handle(ctrl("n"));
+    // With nothing focused the app's root view hears Tab, and its rule
+    // takes nothing (rules take keys from a focused view): the traversal
+    // still moves the focus to the first stop.
+    assert_eq!(view.handle(key("Tab", Default::default())), Handled::Yes);
     draw_until(
         &mut view,
         &mut terminal,
         &rx,
-        "focused true false heard none",
+        "focused true false heard Tab false",
     );
     // A key the rule does not name is heard unmarked, and does nothing.
     view.handle(key("q", Default::default()));
@@ -1466,16 +1467,18 @@ fn a_text_field_keeps_its_keys_even_under_a_capture_of_every_key() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "armed false");
     // The field takes the focus while no capture is mounted; its focus
-    // mounts the rule over it.
+    // mounts the rule over it. With nothing focused before, the page (the
+    // app's root view) heard Ctrl+N, uncaptured.
     view.handle(ctrl("n"));
     draw_until(&mut view, &mut terminal, &rx, "armed true");
+    draw_until(&mut view, &mut terminal, &rx, "heard n false");
     // The rule covers the field now: typing still edits it, and the views
     // around it hear no part of the edit.
     assert_eq!(view.handle(key("a", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "armed true");
     assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "a");
     assert!(
-        super::dock::dump(&terminal).contains("heard none none"),
+        super::dock::dump(&terminal).contains("heard n false"),
         "the capture did not intercept the field's key"
     );
 }
@@ -1682,12 +1685,14 @@ fn a_disabled_ancestors_rule_neither_captures_nor_hears_its_childs_key() {
         &rx,
         "focused none heard none disabled none",
     );
+    // With nothing focused the enabled root view hears Ctrl+N, and its
+    // rule takes nothing then: the traversal focuses the child.
     view.handle(ctrl("n"));
     draw_until(
         &mut view,
         &mut terminal,
         &rx,
-        "focused child heard none disabled none",
+        "focused child heard n false disabled none",
     );
     // The child's key is the enabled ancestor's to capture; the disabled
     // view between them neither takes it nor hears it.
@@ -1748,12 +1753,23 @@ fn an_app_shortcut_keeps_its_priority_over_a_capture_of_every_key() {
         &rx,
         "focused none shortcut 0 heard none",
     );
+    // With nothing focused the shortcut comes first too: the root view,
+    // which hears the window's other keys then, hears no part of it.
+    assert_eq!(view.handle(ctrl("s")), Handled::Yes);
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "focused none shortcut 1 heard none",
+    );
+    // Ctrl+N is no shortcut: the root view hears it, uncaptured, and the
+    // traversal focuses the button.
     view.handle(ctrl("n"));
     draw_until(
         &mut view,
         &mut terminal,
         &rx,
-        "focused button shortcut 0 heard none",
+        "focused button shortcut 1 heard n false",
     );
     // Ctrl+S is the app's: the view never hears it, captured or not.
     assert_eq!(view.handle(ctrl("s")), Handled::Yes);
@@ -1761,7 +1777,7 @@ fn an_app_shortcut_keeps_its_priority_over_a_capture_of_every_key() {
         &mut view,
         &mut terminal,
         &rx,
-        "focused button shortcut 1 heard none",
+        "focused button shortcut 2 heard n false",
     );
     // Any other key is the rule's to capture and the views' to hear.
     assert_eq!(view.handle(key("a", Default::default())), Handled::Yes);
@@ -1769,8 +1785,66 @@ fn an_app_shortcut_keeps_its_priority_over_a_capture_of_every_key() {
         &mut view,
         &mut terminal,
         &rx,
-        "focused button shortcut 1 heard a true",
+        "focused button shortcut 2 heard a true",
     );
+}
+
+/// A root view that hears releases, around a stop that removes itself when
+/// a key goes down on it.
+#[component]
+fn RemovedBeforeRelease() -> impl IntoElement {
+    let shown = signal(true);
+    let focused = signal(false);
+    let heard = signal(String::from("none"));
+    view()
+        .flex_1()
+        .on_key_up(move |event: &KeyEvent| heard.set(format!("root up {}", event.key.as_str())))
+        .when(shown.get(), |page| {
+            page.child(
+                view()
+                    .h(px(16.0))
+                    .focusable(true)
+                    .on_press(|_: &()| {})
+                    .on_focus(move |_: &()| focused.set(true))
+                    .on_key_down(move |_: &KeyEvent| shown.set(false))
+                    .child(text("stop")),
+            )
+        })
+        .child(text(move || {
+            format!(
+                "focused {} shown {} heard {}",
+                focused.get(),
+                shown.get(),
+                heard.get()
+            )
+        }))
+}
+
+/// A release goes where the focus is when it comes: the press removed the
+/// focused view, so nothing has the focus and the app's root view hears it.
+#[test]
+fn a_release_after_the_focused_view_went_reaches_the_root_view() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 8)).unwrap();
+    view.load(App::Rust(Root::new::<RemovedBeforeRelease>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focused false shown true");
+    view.handle(ctrl("n"));
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "focused true shown true heard none",
+    );
+    // The stop hears the press and goes; the root view hears no presses.
+    view.handle(key("a", Default::default()));
+    draw_until(&mut view, &mut terminal, &rx, "shown false heard none");
+    view.handle(Input::Key {
+        key: "a".into(),
+        modifiers: Default::default(),
+        release: true,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "heard root up a");
 }
 
 /// A page that captures `a` and listens, with an opener whose sheet has the

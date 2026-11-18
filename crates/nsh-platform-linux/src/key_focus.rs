@@ -14,7 +14,10 @@
 //! other views leave the shortcuts to the app's `ShortcutController`, as
 //! before. A captured key is reported (`KeyEvent::captured`) and runs none
 //! of the menu's shortcuts or defaults: no traversal, activation or context
-//! menu. A key that only listens runs them as before.
+//! menu. A key that only listens runs them as before. With nothing focused
+//! in the window, the key goes to the window's root
+//! ([`unfocused_root`]) after the app's shortcuts, uncaptured, and the
+//! menu's shortcuts and Tab follow.
 //!
 //! A native popup (a context menu, the menu bar's menus, their nested
 //! submenus) grabs the keyboard: its releases never reach the window's
@@ -159,10 +162,15 @@ pub(crate) fn watch(surface: &Rc<Surface>, window: &gtk::Window) {
             let focused = window
                 .as_ref()
                 .and_then(|window| focused_view(&surface, window));
+            // With nothing focused, the window's root hears the release.
+            let unfocused = window.as_ref().and_then(|window| {
+                unfocused_root(&surface, window, GtkWindowExt::focus(window).as_ref())
+            });
             crate::keyboard::released(
                 &surface,
                 window.as_ref(),
                 focused.as_ref(),
+                unfocused,
                 keyval,
                 keycode,
                 modifiers,
@@ -217,6 +225,26 @@ pub(crate) fn focused_view(surface: &Surface, window: &gtk::Window) -> Option<Ns
     focused_stop(surface, GtkWindowExt::focus(window))
 }
 
+/// The root node of `window` (the main window's [`nsh_core::ROOT_ID`], or
+/// the root of one of the app's own) when nothing in it has the keyboard
+/// focus: GTK focuses no widget there, or only the window's root view. A
+/// key then goes to that root, and the core hands it to the app's root
+/// view in the window (`Core::key_target`). A field, a web view or any
+/// other widget with the focus keeps its keys: `None`.
+pub(crate) fn unfocused_root(
+    surface: &Surface,
+    window: &gtk::Window,
+    focus: Option<&gtk::Widget>,
+) -> Option<nsh_core::NodeId> {
+    let id = crate::window::id_of(surface, window)?;
+    match focus {
+        None => Some(id),
+        Some(widget) => crate::window::root_view(surface, id)
+            .is_some_and(|root| root.upcast_ref::<gtk::Widget>() == widget)
+            .then_some(id),
+    }
+}
+
 /// Watches the keys a native popup receives while it owns the keyboard
 /// grab: a context menu, the menu bar's menus and their nested submenus
 /// (`GtkPopoverMenu`s), all under `widget`.
@@ -252,10 +280,12 @@ pub(crate) fn observe_popovers(surface: &Rc<Surface>, widget: &gtk::Widget) {
                 let modifiers =
                     crate::keyboard::modifier_state(keys.current_event().as_ref(), modifiers);
                 let focused = focused_view(&surface, &window);
+                // The popup has the keys: its window's root hears none.
                 crate::keyboard::released(
                     &surface,
                     Some(&window),
                     focused.as_ref(),
+                    None,
                     keyval,
                     keycode,
                     modifiers,
@@ -372,10 +402,35 @@ pub(crate) fn press(
         (Some(event), Some(widget)) => crate::chrome::menu_shortcut(surface, widget, event),
         _ => false,
     };
+    let unfocused = window
+        .as_ref()
+        .and_then(|window| unfocused_root(surface, window, focus.as_ref()));
     let Some(view) = focused_stop(surface, focus) else {
-        // A native field (or no focus) has no view to notify: the app's
-        // bindings first, then the menu's shortcuts, then Tab's traversal.
-        if event.is_some_and(|event| crate::keymap::claims(surface, event)) {
+        if let (Some(id), Some(window)) = (unfocused, window.as_ref()) {
+            // Nothing has the focus: as for a raw view, the app's bindings
+            // run first, once (a consuming one takes the key, a passing
+            // one reports before the key goes on). Then the window's root
+            // hears the key (the core hands it to the app's root view
+            // there), and no capture rule takes it, so the menu's
+            // shortcuts and Tab still follow.
+            let repeat = crate::keyboard::held(surface, window, keycode);
+            if let Some(event) = event
+                && let crate::keymap::RawFire::Consumed = crate::keymap::raw(surface, event, repeat)
+            {
+                return true;
+            }
+            let key_event = crate::keyboard::key_event(
+                surface,
+                keyval,
+                keycode,
+                modifiers,
+                crate::keyboard::KeyPhase::Down { repeat },
+            );
+            crate::keyboard::notify_root(surface, id, EventKind::KeyDown, key_event);
+        } else if event.is_some_and(|event| crate::keymap::claims(surface, event)) {
+            // A native field has no view to notify: the app's bindings
+            // first (GTK's controller), then the menu's shortcuts, then
+            // Tab's traversal.
             return false;
         }
         if menu_shortcut() {
@@ -934,6 +989,7 @@ mod tests {
                 &surface,
                 Some(&window),
                 focused_view(&surface, &window).as_ref(),
+                None,
                 gdk::Key::Escape,
                 9,
                 gdk::ModifierType::empty(),
@@ -973,6 +1029,34 @@ mod tests {
                 crate::keyboard::listens(&surface, &plain),
                 "a capture policy"
             );
+        });
+    }
+
+    /// With nothing focused the window's keys go to its root (the core
+    /// hands them to the app's root view); a focused stop has them itself.
+    #[test]
+    fn a_window_with_nothing_focused_sends_its_keys_to_its_root() {
+        run(|| {
+            let surface = surface();
+            views(&surface);
+            let window = show(&surface);
+            let first = view(&surface, 2);
+            assert!(wait_until(|| first.is_mapped()));
+            let focus = || GtkWindowExt::focus(&window);
+            assert!(focus().is_none());
+            assert_eq!(
+                unfocused_root(&surface, &window, focus().as_ref()),
+                Some(ROOT_ID)
+            );
+            super::focus(&first);
+            assert!(first.is_focus());
+            assert_eq!(unfocused_root(&surface, &window, focus().as_ref()), None);
+            assert!(blur(&first));
+            assert_eq!(
+                unfocused_root(&surface, &window, focus().as_ref()),
+                Some(ROOT_ID)
+            );
+            window.destroy();
         });
     }
 

@@ -2,7 +2,11 @@
 //! and for TSX views.
 //!
 //! Desktops and browsers deliver [`KeyEvent`] notifications for the
-//! focused view; app-rendered interaction surfaces can forward the logical
+//! focused view. With nothing focused in a window, a platform sends them
+//! at the window's root and the core hands them to the app's root view
+//! there, or the dialog shown over it (`Core::key_target`), as the DOM
+//! targets `document.body`; capture rules take nothing then. App-rendered
+//! interaction surfaces can forward the logical
 //! key, its DOM `code`, repeats and releases to their own input engine. Raw
 //! key names are input data: the DOM's spelling for named keys, and the
 //! character a printable key reports, never forced onto a made-up layout.
@@ -26,7 +30,8 @@ use crate::{
 };
 
 /// A key that went down or came up on the focused view (`on_key_down` /
-/// `on_key_up`), as GPUI's `KeyDownEvent`.
+/// `on_key_up`), or on the app's root view while nothing has the focus, as
+/// GPUI's `KeyDownEvent`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct KeyEvent {
@@ -56,6 +61,7 @@ pub struct KeyEvent {
     /// this one transition, observable state as the DOM's `defaultPrevented`
     /// is, not a veto a listener can cast: the UI thread does not wait for
     /// engine-thread JS or Rust callbacks, which are told after the fact.
+    /// Always false for a key heard with nothing focused.
     pub default_prevented: bool,
 }
 

@@ -333,6 +333,11 @@ pub(crate) struct Input {
     /// ([`keyboard_context_menu_opened`]), so that it does not go on to the
     /// window an embedded surface is in.
     context_key: Cell<bool>,
+    /// An edit menu item's key (Undo, Copy, Paste, ...) is being handled: a
+    /// press the menu made for the focused field, with no release, so a
+    /// window with nothing focused reports it to no view
+    /// (`keyboard::unfocused_key`).
+    pub(crate) menu_key: Cell<bool>,
     /// Next touch identifier.
     next_id: Cell<u32>,
     /// Next press generation (invalidates callbacks of earlier ones).

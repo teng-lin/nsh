@@ -28996,6 +28996,223 @@ fn key_interest_walks_portaled_overlay_logical_ancestors() {
     assert_eq!(routed_parent("unrelated-portal"), None);
 }
 
+/// A key a platform sends at the window's root (nothing in the window has
+/// the focus) starts at the app's root view and bubbles from it, as the
+/// DOM's `keydown` on `document.body`; a dialog shown over the window
+/// takes it while it shows. A focused view keeps its own path.
+#[test]
+fn a_key_with_nothing_focused_goes_to_the_apps_root_view() {
+    let mut c = core();
+    let listen = |id| Op::Listen {
+        id,
+        event: EventKind::KeyDown,
+        enabled: true,
+    };
+    // Nothing rendered yet: the root keeps the key.
+    assert_eq!(c.key_target(ROOT_ID), ROOT_ID);
+    let mut path = Vec::new();
+    c.key_path(ROOT_ID, &mut path);
+    assert_eq!(path, [ROOT_ID]);
+
+    // The app renders its root view, which listens.
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::View, 2, &[]);
+    apply(&mut c, vec![listen(2)]);
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 2);
+    c.key_path(ROOT_ID, &mut path);
+    assert_eq!(path, [2, ROOT_ID]);
+    assert!(c.key_interest(ROOT_ID));
+    // A focused view's path is its own.
+    assert_eq!(c.key_target(4), 4);
+    c.key_path(4, &mut path);
+    assert_eq!(path, [4, 2, ROOT_ID]);
+
+    // A dialog shows (declared inside the app): it takes the keys of the
+    // window with nothing focused, and they bubble from it (its listeners,
+    // then the views it is declared in).
+    add(&mut c, 6, Tag::Modal, 4, &[]);
+    add(&mut c, 8, Tag::View, 6, &[]);
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 6);
+    c.key_path(ROOT_ID, &mut path);
+    assert_eq!(path, [6, 4, 2, ROOT_ID]);
+    // A newer dialog over it takes them from it.
+    add(&mut c, 10, Tag::Modal, 8, &[]);
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 10);
+    // Android's dialog window sends its own unfocused keys to its dialog.
+    assert_eq!(c.key_target(6), 6);
+
+    // The dialogs close: the app's root view hears the keys again.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 8,
+                child: 10,
+            },
+            Op::Remove {
+                parent: 4,
+                child: 6,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 2);
+}
+
+/// Capture rules take keys from a focused view: a key with nothing focused
+/// reaches the root view's listeners while its `captureKeys` takes nothing,
+/// so the platform's defaults (Tab moving the focus in) still run.
+#[test]
+fn a_key_with_nothing_focused_is_heard_and_never_captured() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Game() -> impl IntoElement {
+        view()
+            .capture_keys(KeyCapture::All)
+            .on_key_down(|_: &KeyEvent| {})
+            .child(view().focusable(true))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Game>());
+    let batch = c.commit().unwrap();
+    let root_view = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props } if props.key_capture == KeyCapture::All => Some(*id),
+            _ => None,
+        })
+        .expect("the capture rule mounts");
+    // The Rust app's root component's view is the window's root view.
+    assert_eq!(c.key_target(ROOT_ID), root_view);
+    let mut path = Vec::new();
+    c.key_path(ROOT_ID, &mut path);
+    assert_eq!(path.first(), Some(&root_view));
+    assert!(c.listens(root_view, EventKind::KeyDown));
+    assert!(c.key_interest(ROOT_ID));
+    // Focused, the view captures; with nothing focused, nothing does.
+    assert!(c.key_captured(root_view, None));
+    assert!(!c.key_captured(ROOT_ID, None));
+}
+
+/// The dialog shown last takes the keys of the window with nothing focused,
+/// whichever was made first: one made before another and shown after it,
+/// or one moved, is over it.
+#[test]
+fn a_key_with_nothing_focused_goes_to_the_dialog_shown_last() {
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    // Two dialogs made, B shown first.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::Modal,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::Modal,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 6);
+    // A, made earlier, shows over it.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        }],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 4);
+    // B moved (shown again) is over A.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 2,
+            child: 6,
+            before: Some(4),
+        }],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 6);
+}
+
+/// Several top-level views (a fragment the app mounts): the first is the
+/// root view that hears the keys with nothing focused, and the others are
+/// not on its path.
+#[test]
+fn a_key_with_nothing_focused_goes_to_the_first_top_level_view() {
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::View, ROOT_ID, &[]);
+    c.commit().unwrap();
+    assert_eq!(c.key_target(ROOT_ID), 2);
+    let mut path = Vec::new();
+    c.key_path(ROOT_ID, &mut path);
+    assert_eq!(path, [2, ROOT_ID]);
+}
+
+/// A window of the app's own with nothing focused sends its keys to its
+/// own root view; the main window's root view hears none of them.
+#[test]
+fn a_key_with_nothing_focused_in_an_app_window_goes_to_its_root_view() {
+    use crate::{
+        desktop::{DesktopCommand, OpenWindow},
+        geometry::size,
+    };
+
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::MacOs,
+        ..Default::default()
+    });
+    c.set_viewport(size(px(800.0), px(600.0)));
+    let mut open = OpenWindow::default();
+    open.options.id = "notes".into();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::Modal,
+            },
+            Op::Command {
+                id: 4,
+                command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(open)))),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    add(&mut c, 6, Tag::View, 4, &[]);
+    c.commit().unwrap();
+    // The app window is no dialog over the main window.
+    assert_eq!(c.key_target(ROOT_ID), 2);
+    assert_eq!(c.key_target(4), 6);
+    let mut path = Vec::new();
+    c.key_path(4, &mut path);
+    assert_eq!(path, [6, 4]);
+}
+
 #[test]
 fn context_menus_reach_rust_listeners_with_their_positions() {
     use crate::prelude::*;

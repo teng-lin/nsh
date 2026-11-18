@@ -490,7 +490,27 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Raw key notifications** (`onKeyDown` / `onKeyUp`, Rust `Interactive::on_key_down` / `on_key_up`): a platform
   sends ONE `EventPayload::Key` at the focused view. The engine's common routing takes the core's window-bounded,
   enabled path (`Core::key_path`) and notifies Rust component listeners and JS listeners once each per view, for
-  both transitions; no backend sends an event per ancestor. `KeyEvent` carries the source's raw logical `key`
+  both transitions; no backend sends an event per ancestor. With nothing focused in a window, the platform sends the
+  event at the window's root (`ROOT_ID`, the root of a window of the app's own; Android's dialog window at its dialog)
+  and the core starts the path at `Core::key_target`, as the DOM targets `document.body`: the dialog inserted last in
+  that window (`Core::insert` moves a dialog to the end of `roots`, so one made earlier and shown later, or moved, is
+  over the others), else the window's root view (the root's first child that is not a dialog or overlay: what `mount`
+  rendered, a Rust app's root component, a window's content; with several top-level views the first, and for a root
+  `NavStack` its stack node rather than its top page, so apps put the listeners on one view around everything); a
+  dialog keeps its own. Capture rules take keys from a focused view only (`Core::key_captured` is false at a window's
+  root, Android's `RawKeys.prevented` at its window's fallback, a dialog window's too), so the defaults still run (Tab
+  moves the focus in): the backends decide capture on the main thread from the mounted policies of the focused
+  view's ancestry, which name no key target. Nor does a backend know
+  whether the key target listens, so with nothing focused it sends each transition and the engine drops one that
+  reaches no listener; the web asks the core first (`nsh_key_interest`). The backends report the root while nothing
+  has the focus and after the app's shortcuts: Android's `KeyDispatch`
+  always reports its window's fallback node; macOS when the window's root view (or, in a window NSH fills, the window)
+  is the first responder (`keyboard::unfocused`); Linux when GTK focuses no widget or only the root
+  (`key_focus::unfocused_root`); Windows and GPUI when neither a custom view nor a field of the window has the focus;
+  iOS when the surface root is the first responder (`keyboard::root_began`); the web when the page's body has the focus
+  and the player takes the keys; the terminal and the headless driver when no view has the focus. A release follows
+  the focus as a press does: it reaches the view focused when it comes, else the root view. `KeyEvent` carries the
+  source's raw logical `key`
   (`SharedString`: the DOM's spelling for named keys, else the character the layout reports, its case kept), the
   physical `code` in the DOM's spelling (`"KeyA"`, `"ArrowLeft"`, `"NumpadEnter"`, `"ShiftLeft"`; `""` when the
   source has no genuine physical identity — GPUI's logical events, synthetic input — and never inferred from

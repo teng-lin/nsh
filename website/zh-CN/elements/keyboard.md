@@ -188,7 +188,8 @@ function MessageBar() {
 
 ## 自定义视图的硬件按键
 
-获得焦点的视图会收到其平台报告的真实硬件按键转换：TSX 中的 `onKeyDown` / `onKeyUp`，或 Rust 中的 `on_key_down` / `on_key_up`。
+获得焦点的视图会收到其平台报告的真实硬件按键转换：TSX 中的 `onKeyDown` / `onKeyUp`，或 Rust 中的 `on_key_down` / `on_key_up`；
+没有视图获得焦点时，由应用的根视图接收该窗口的按键。
 这适用于自行绘制的画布或嵌入式交互界面。命名快捷键使用 `on_key` / `on_key_with`，文本编辑使用 `Input`，终端会话使用 `Terminal`。
 
 `KeyEvent` 只报告输入源实际提供的数据：
@@ -203,6 +204,36 @@ function MessageBar() {
 
 两个监听函数都不返回值。聚焦视图上的一个平台事件会沿同一原生窗口内的已启用监听祖先各传播一次，`onKeyDown` 与 `onKeyUp` 都是如此。
 输入源报告的真实释放会到达聚焦视图，即使最初的按下发生在别处（与 DOM 一致）；窗口失去焦点会清除按住状态，不会伪造释放事件。
+
+窗口里没有任何视图获得焦点时，由应用在该窗口的根视图接收该窗口的按键：即 `mount` 渲染的第一个顶层视图（Rust 应用的根组件、
+窗口的内容），或显示在窗口之上的对话框。它像聚焦视图一样接收按键，事件也从那里向上传播，与 DOM 在没有元素获得焦点时把
+`keydown` 发给 `document.body` 一致。应用的快捷键先处理自己的按键。因此应用根视图上的监听函数会收到其内部聚焦视图的按键，
+以及没有焦点时该窗口的按键；获得焦点的文本输入框、网页视图或原生组件保留自己的按键，释放事件发给释放时获得焦点的视图。
+请在最顶层渲染一个包住整个应用的视图（`NavStack` 外面也一样），把监听函数放在它上面：有多个顶层视图时，由第一个接收按键。
+
+捕获规则只从聚焦视图及其祖先拿走按键：没有焦点时收到的按键报告 `defaultPrevented: false`，根视图的 `captureKeys` 规则此时
+不拿走任何按键，平台的默认行为照常执行，Tab 会把焦点移入应用。要在这种状态下把某个按键留给应用，请用 `keymap` 绑定它。
+
+```tsx
+import { mount, signal, Text, View } from "nsh";
+
+function Game() {
+  const held = signal<string[]>([]);
+  // 输入源没有报告物理按键时，`code` 为 ""。
+  const name = (e: { code: string; key: string }) => e.code || e.key;
+  return (
+    <View
+      style={{ flex: 1 }}
+      onKeyDown={(e) => !e.repeat && held.update((keys) => [...keys, name(e)])}
+      onKeyUp={(e) => held.update((keys) => keys.filter((key) => key !== name(e)))}
+    >
+      <Text>{`按住：${held().join(" ") || "无"}`}</Text>
+    </View>
+  );
+}
+
+mount(Game);
+```
 
 `Scroll`、`List` 和 `Overlay` 等宿主元素也支持同样的类型化属性。祖先上的监听和捕获规则沿聚焦后代的逻辑祖先链生效，
 包括渲染在浮层中的后代。只有当浮层的逻辑祖先链上确实存在这类监听或规则时才会启用这种转发：没有这类祖先的普通浮层

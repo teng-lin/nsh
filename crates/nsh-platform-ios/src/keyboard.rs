@@ -66,6 +66,13 @@
 //! invented. Command+Tab is the system's app switcher and is never
 //! intercepted.
 //!
+//! While nothing has the focus the surface root is the first responder,
+//! and its presses (those the app's shortcuts pass on) are reported at the
+//! root node ([`root_began`], [`root_ended`]): the core hands them to the
+//! app's root view (`Core::key_target`), which hears them as from a
+//! focused view. No capture rule takes them, so Tab still moves to the
+//! first stop.
+//!
 //! Blur, cancellation and deactivation clear the keys a view holds without
 //! synthesizing a release: the source delivered no `pressesEnded:`, so no
 //! `KeyUp` is invented. A real release that arrives after the focus moved
@@ -378,6 +385,75 @@ pub(crate) fn cancelled(view: &NshView, presses: &NSSet<UIPress>) -> bool {
         state.clear();
     }
     cleared
+}
+
+/// `pressesBegan:withEvent:` of the surface's root view while it is the
+/// first responder (nothing has the focus), after the app's shortcuts
+/// passed on the presses: a `KeyDown` per key at the root
+/// ([`nsh_core::ROOT_ID`]), which the core hands to the app's root view
+/// (or the dialog shown over it, `Core::key_target`). No capture rule takes
+/// them (they take keys from a focused view), so Tab still moves to the
+/// first stop ([`root_tab`]).
+pub(crate) fn root_began(view: &UIView, target: &EventTarget, presses: &NSSet<UIPress>) {
+    if !view.isFirstResponder() {
+        return;
+    }
+    let mtm = MainThreadMarker::from(view);
+    let state = target.keyboard();
+    for press in presses.iter() {
+        let Some(key) = press.key(mtm) else {
+            continue;
+        };
+        let Some(usage) = usage(&key) else {
+            continue;
+        };
+        let down = event(&key, usage, state, true);
+        target.dispatch(
+            nsh_core::ROOT_ID,
+            EventKind::KeyDown,
+            EventPayload::Key(down),
+        );
+        state.down(usage);
+    }
+}
+
+/// `pressesEnded:withEvent:` of the surface's root view while it is the
+/// first responder: a `KeyUp` per key at the root, as [`root_began`]. A
+/// release whose press went to a view that has the focus no more is
+/// reported here too (the DOM's behavior: the release goes where the focus
+/// is now).
+pub(crate) fn root_ended(view: &UIView, target: &EventTarget, presses: &NSSet<UIPress>) {
+    if !view.isFirstResponder() {
+        return;
+    }
+    let mtm = MainThreadMarker::from(view);
+    let state = target.keyboard();
+    for press in presses.iter() {
+        let Some(key) = press.key(mtm) else {
+            continue;
+        };
+        let Some(usage) = usage(&key) else {
+            continue;
+        };
+        let up = event(&key, usage, state, false);
+        target.dispatch(nsh_core::ROOT_ID, EventKind::KeyUp, EventPayload::Key(up));
+        state.up(usage);
+    }
+}
+
+/// `pressesCancelled:withEvent:` of the surface's root view: what the
+/// cancelled keys held is forgotten, and no release is invented.
+pub(crate) fn root_cancelled(view: &UIView, target: &EventTarget, presses: &NSSet<UIPress>) {
+    let mtm = MainThreadMarker::from(view);
+    let state = target.keyboard();
+    for press in presses.iter() {
+        if let Some(usage) = press.key(mtm).as_deref().and_then(usage) {
+            state.up(usage);
+            if modifier_mask(usage).is_some() {
+                state.modifiers.borrow_mut().remove(&usage);
+            }
+        }
+    }
 }
 
 /// The HID usage of `key`, if it is one.

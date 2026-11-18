@@ -12,8 +12,10 @@
 //! enabled view around it deciding whether the platform keeps it
 //! (`capture_keys`): a captured press types nothing and runs no default,
 //! and the view focused when the source reports the release hears its
-//! `KeyUp`. A press the platform keeps goes on to its defaults:
-//! Return and Space press the focused control, then on a desktop the
+//! `KeyUp`. With nothing focused the window's root view (the app's root,
+//! or the dialog shown over it: `Core::key_target`) hears both, and no
+//! capture rule takes them. A press the platform keeps goes on to its
+//! defaults: Return and Space press the focused control, then on a desktop the
 //! application menu's item with that shortcut is chosen (`onMenu`); else
 //! Tab moves the keyboard focus between the inputs and the views that are
 //! its stops (those that take presses, and `focusable` ones that take none)
@@ -80,7 +82,9 @@ impl Headless {
     /// press types nothing and runs no default. The view focused when the
     /// source reports the release hears the `KeyUp` after the platform has
     /// chosen what the key does (the defaults below, or none when
-    /// captured), with its capture rule read afresh. What the platform
+    /// captured), with its capture rule read afresh. With nothing focused,
+    /// the window's root view (or the dialog shown over it) hears the press
+    /// and the release, and nothing captures them. What the platform
     /// keeps goes on to its defaults: Return and Space press
     /// the focused control, then the application menu's shortcuts, a
     /// window's Escape, the context-menu keys and Tab; elsewhere the focused
@@ -191,6 +195,19 @@ impl Headless {
             );
             raw = true;
             captured
+        } else if !editing && self.delivers_raw_input() && self.screen.key_focus().is_none() {
+            // Nothing has the focus: the key goes to the window's root,
+            // and the core hands it to the app's root view there (or the
+            // dialog shown over it, `Core::key_target`). No capture rule
+            // takes it (they take keys from a focused view), so the
+            // defaults below still run.
+            self.engine.control().dispatch_event(
+                window,
+                EventKind::KeyDown,
+                EventPayload::Key(view_key_event(&stroke)),
+            );
+            raw = true;
+            false
         } else {
             false
         };
@@ -300,17 +317,35 @@ impl Headless {
         // the view focused now (a default may have moved it) with the
         // capture rule mounted now. A native input or native content owns
         // the release it receives.
-        if raw
-            && self.screen.focused().is_none()
-            && let Some(view) = self.screen.key_focus()
-            && self.screen.accepts_key_focus(view)
-            && !self.screen.hosts_native(view)
-        {
-            let mut up = view_key_event(&stroke);
-            up.default_prevented = self.screen.captures_key(view, &stroke);
-            self.engine
-                .control()
-                .dispatch_event(view, EventKind::KeyUp, EventPayload::Key(up));
+        if raw && self.screen.focused().is_none() {
+            match self.screen.key_focus() {
+                Some(view)
+                    if self.screen.accepts_key_focus(view) && !self.screen.hosts_native(view) =>
+                {
+                    let mut up = view_key_event(&stroke);
+                    up.default_prevented = self.screen.captures_key(view, &stroke);
+                    self.engine.control().dispatch_event(
+                        view,
+                        EventKind::KeyUp,
+                        EventPayload::Key(up),
+                    );
+                }
+                Some(_) => {}
+                // Still nothing focused: the window's root view hears the
+                // release, as it heard the press.
+                None => {
+                    let window = self
+                        .windows
+                        .as_ref()
+                        .and_then(|w| w.focused())
+                        .unwrap_or(ROOT_ID);
+                    self.engine.control().dispatch_event(
+                        window,
+                        EventKind::KeyUp,
+                        EventPayload::Key(view_key_event(&stroke)),
+                    );
+                }
+            }
         }
         Ok(go_back)
     }

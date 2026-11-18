@@ -5333,9 +5333,12 @@ impl<M: TextEngine> Core<M> {
     /// that is not `None`. Follows the logical tree (`node.parent`), so an
     /// overlay's content finds the views it is logically in even where a
     /// backend mounts it elsewhere. No allocation: a walk per transition.
+    ///
+    /// A window's root stands for its key target ([`Self::key_target`]):
+    /// the interest of the view a key with nothing focused reaches.
     #[doc(hidden)]
     pub fn key_interest(&self, id: NodeId) -> bool {
-        let Ok(mut key) = self.key(id) else {
+        let Ok(mut key) = self.key(self.key_target(id)) else {
             return false;
         };
         let window = self.key_window(key);
@@ -5371,10 +5374,15 @@ impl<M: TextEngine> Core<M> {
     /// from one platform event; a native window is a keyboard boundary even
     /// when its declarative root remains in another window's logical tree.
     /// A disabled view hears nothing, and its enabled ancestors still do.
+    ///
+    /// A notification at a window's root (nothing in the window has the
+    /// keyboard focus) starts at that window's key target instead
+    /// ([`Self::key_target`]): the app's root view there, or the dialog
+    /// shown over it, and bubbles from it as from a focused view.
     #[doc(hidden)]
     pub fn key_path(&self, id: NodeId, out: &mut Vec<NodeId>) {
         out.clear();
-        let Ok(mut key) = self.key(id) else {
+        let Ok(mut key) = self.key(self.key_target(id)) else {
             return;
         };
         let window = self.key_window(key);
@@ -5401,7 +5409,11 @@ impl<M: TextEngine> Core<M> {
     /// vocabulary names, never from [`crate::KeyEvent`]'s `key` or `code`;
     /// `None` (a key no shortcut names) is captured only by
     /// [`crate::KeyCapture::All`]. A focused native text input keeps the
-    /// keys that edit it: nothing captures them.
+    /// keys that edit it: nothing captures them. A key at a window's root
+    /// (nothing in the window has the focus) is captured by nothing either:
+    /// capture rules take keys from a focused view, so the platform's
+    /// defaults (Tab moving the focus into the app) still run, while the
+    /// listeners of [`Self::key_target`] hear the key.
     #[doc(hidden)]
     pub fn key_captured(&self, id: NodeId, keystroke: Option<&crate::keymap::Keystroke>) -> bool {
         let Ok(mut key) = self.key(id) else {
@@ -5432,6 +5444,55 @@ impl<M: TextEngine> Core<M> {
             }
             key = node.parent;
         }
+    }
+
+    /// The view a raw key notification sent at `id` starts from.
+    ///
+    /// A platform sends a key at a window's root (the surface's root,
+    /// [`ROOT_ID`], or the root of a window of the app's own) when nothing
+    /// in that window has the keyboard focus. Then the key goes to the
+    /// newest dialog shown in that window (its dialog node, which holds the
+    /// listeners the app gave the dialog), else to the window's root view:
+    /// the first view the app rendered into the root (`mount`'s, a Rust
+    /// app's root component, a window's content), not a dialog or overlay
+    /// placed there. A root with neither keeps the key. As the DOM targets
+    /// `document.body` when no element has the focus, the key then bubbles
+    /// from that view as from a focused one. Any other node is its own
+    /// target: a focused view, and a dialog whose own window has nothing
+    /// focused (Android's dialog windows send their keys there).
+    #[doc(hidden)]
+    pub fn key_target(&self, id: NodeId) -> NodeId {
+        let Ok(key) = self.key(id) else {
+            return id;
+        };
+        // By the node's own id (the platform may name an alias).
+        let node = &self.nodes[key as usize];
+        let window = node.id;
+        let window_root = window == ROOT_ID
+            || (node.kind == Kind::Modal
+                && self.window_ids.values().any(|(root, _)| *root == window));
+        if !window_root {
+            return id;
+        }
+        // The newest dialog over this window: inserted last, shown in it.
+        let dialog = self.roots.iter().rev().copied().find(|&k| {
+            let n = &self.nodes[k as usize];
+            n.kind == Kind::Modal
+                && n.created
+                && n.id != window
+                && !self.window_ids.values().any(|(root, _)| *root == n.id)
+                && self.in_tree(k)
+                && self.window_of(k) == window
+        });
+        if let Some(dialog) = dialog {
+            return self.nodes[dialog as usize].id;
+        }
+        self.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&c| &self.nodes[c as usize])
+            .find(|c| !c.is_layout_root())
+            .map_or(window, |c| c.id)
     }
 
     /// The root of the window `key` is in, `key` itself when it is one.

@@ -1815,11 +1815,14 @@ pub trait Interactive: Element {
         )
     }
 
-    /// A hardware key went down on this view or a focused descendant.
-    /// The event carries the source's logical key, its physical `code` and
-    /// the modifiers and repeat state; returning from a listener cannot
-    /// change handling. [`KeyEvent::default_prevented`] reports the
-    /// decision made from [`Self::capture_keys`]. Notifications bubble to
+    /// A hardware key went down on this view or a focused descendant, or,
+    /// with nothing focused in the window, on the app's root view there
+    /// (the first view the app rendered into the window, or the dialog
+    /// shown over it), which hears it as from a focused view. The event
+    /// carries the source's logical key, its physical `code` and the
+    /// modifiers and repeat state; returning from a listener cannot change
+    /// handling. [`KeyEvent::default_prevented`] reports the decision made
+    /// from [`Self::capture_keys`]. Notifications bubble to
     /// enabled listening ancestors within the native window; named
     /// shortcuts keep their priority.
     fn on_key_down<M>(self, listener: impl IntoListener<KeyEvent, M>) -> Self {
@@ -1829,8 +1832,9 @@ pub trait Interactive: Element {
         )
     }
 
-    /// A hardware key came up on the focused view, with the capture
-    /// decision for this transition. It bubbles as [`Self::on_key_down`]
+    /// A hardware key came up on the focused view (with nothing focused,
+    /// the app's root view), with the capture decision for this
+    /// transition. It bubbles as [`Self::on_key_down`]
     /// does. A real release the source reports reaches the focused view
     /// even when its press went elsewhere; a window that loses the focus
     /// invents no releases.
@@ -1846,7 +1850,9 @@ pub trait Interactive: Element {
     /// keys are canonical [`crate::keymap::Keystroke`]s, matched against
     /// the transition's canonical shortcut stroke (the backend's own
     /// matcher, not [`KeyEvent`]'s `key` or `code`); eligible app
-    /// shortcuts and focused native inputs keep priority. Defaults to
+    /// shortcuts and focused native inputs keep priority. A key heard
+    /// with nothing focused is never captured: the platform's defaults
+    /// (Tab moving the focus in) still run. Defaults to
     /// [`KeyCapture::None`]; removing the prop restores it.
     fn capture_keys(mut self, capture: impl IntoReactive<KeyCapture>) -> Self {
         super::host::bind_prop(self.node(), capture, Prop::KeyCapture);

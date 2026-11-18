@@ -33,6 +33,13 @@
 //! or context menu). A key that only *listens* is not captured: the app
 //! hears it and the default still runs.
 //!
+//! With nothing focused in a window (GTK focuses no widget there), both
+//! transitions go to the window's root node ([`notify_root`]), after the
+//! app's shortcuts had their turn: the core hands them to the app's root
+//! view in that window (`Core::key_target`), which hears them as from a
+//! focused view. No capture rule takes them, so the menu's shortcuts and
+//! Tab's traversal still run.
+//!
 //! A view that hears none of the raw keys and captures none takes
 //! [`crate::key_focus`]'s original path: [`listens`] is a few mask
 //! checks, with no raw [`KeyEvent`] allocation. Modifier transitions
@@ -42,7 +49,7 @@ use std::cell::RefCell;
 
 use gtk4::{self as gtk, gdk, glib, prelude::*};
 use nsh_core::{
-    EventKind, EventPayload, KeyEvent, ViewKind,
+    EventKind, EventPayload, KeyEvent, NodeId, ViewKind,
     element::SharedString,
     keymap::{Key as ShortcutKey, Keystroke},
 };
@@ -178,6 +185,15 @@ pub(crate) fn notify(surface: &Surface, view: &NshView, kind: EventKind, event: 
     surface.event(view.id(), kind, EventPayload::Key(event));
 }
 
+/// Reports a key transition of a window with nothing focused at its root
+/// node `root` ([`crate::key_focus::unfocused_root`]): the core hands it
+/// to the app's root view there (`Core::key_target`), which hears it as
+/// from a focused view. No capture rule takes it: those take keys from a
+/// focused view, so `default_prevented` stays false.
+pub(crate) fn notify_root(surface: &Surface, root: NodeId, kind: EventKind, event: KeyEvent) {
+    surface.event(root, kind, EventPayload::Key(event));
+}
+
 /// The keyboard layout group of a GDK key event (`0` when there is no
 /// event or it is not a key event): `gdk::KeyEvent::layout`.
 pub(crate) fn layout(event: Option<&gdk::Event>) -> i32 {
@@ -253,13 +269,17 @@ fn effective_modifiers(
 }
 
 /// A real key came up: clear its hold in `window` (whatever view heard its
-/// press) and report `KeyUp` to the view focused now, if any. A held
-/// modifier is tracked even when nothing has the focus or the key went to
-/// a native widget: the next raw event must carry it.
+/// press) and report `KeyUp` to the view focused now, or to the window's
+/// root `unfocused` when nothing has the focus there
+/// ([`crate::key_focus::unfocused_root`]). A held modifier is tracked even
+/// when nothing has the focus or the key went to a native widget: the next
+/// raw event must carry it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn released(
     surface: &Surface,
     window: Option<&gtk::Window>,
     view: Option<&NshView>,
+    unfocused: Option<NodeId>,
     keyval: gdk::Key,
     keycode: u32,
     state: gdk::ModifierType,
@@ -282,6 +302,10 @@ pub(crate) fn released(
     }
     drop(pressed);
     let Some(view) = view else {
+        if let Some(root) = unfocused {
+            let event = key_event(surface, keyval, keycode, state, KeyPhase::Up);
+            notify_root(surface, root, EventKind::KeyUp, event);
+        }
         return;
     };
     if !listens(surface, view) || native_owns(view) {

@@ -289,13 +289,18 @@ define_class!(
         }
 
         /// Hardware keys no responder inside handled: the app's shortcuts
-        /// (`nsh/keymap`) take those they bind, then Tab with no focused
-        /// view moves to the first stop ([`crate::keyboard::root_tab`]).
+        /// (`nsh/keymap`) take those they bind; with no focused view the
+        /// root reports the others (the app's root view hears them,
+        /// [`crate::keyboard::root_began`]), then Tab moves to the first
+        /// stop ([`crate::keyboard::root_tab`]).
         #[unsafe(method(pressesBegan:withEvent:))]
         fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self.target().is_some_and(|target| {
-                crate::keymap::root_began(&target, presses)
-                    || crate::keyboard::root_tab(self, &target, presses)
+                if crate::keymap::root_began(&target, presses) {
+                    return true;
+                }
+                crate::keyboard::root_began(self, &target, presses);
+                crate::keyboard::root_tab(self, &target, presses)
             });
             if !consumed {
                 // SAFETY: calling the superclass implementation.
@@ -305,9 +310,15 @@ define_class!(
 
         #[unsafe(method(pressesEnded:withEvent:))]
         fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
-            let consumed = self
-                .target()
-                .is_some_and(|target| crate::keymap::ended(&target, presses));
+            let consumed = self.target().is_some_and(|target| {
+                // The release of a key the app's shortcuts took is theirs;
+                // the others reach the app's root view while nothing has
+                // the focus.
+                crate::keymap::ended(&target, presses) || {
+                    crate::keyboard::root_ended(self, &target, presses);
+                    false
+                }
+            });
             if !consumed {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
@@ -316,9 +327,10 @@ define_class!(
 
         #[unsafe(method(pressesCancelled:withEvent:))]
         fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
-            let consumed = self
-                .target()
-                .is_some_and(|target| crate::keymap::ended(&target, presses));
+            let consumed = self.target().is_some_and(|target| {
+                crate::keyboard::root_cancelled(self, &target, presses);
+                crate::keymap::ended(&target, presses)
+            });
             if !consumed {
                 // SAFETY: calling the superclass implementation.
                 let _: () =

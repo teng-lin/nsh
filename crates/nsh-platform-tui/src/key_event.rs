@@ -1,6 +1,8 @@
 //! Raw key transitions for custom views: the `on_key_down` / `on_key_up`
 //! notifications a focused view and its ancestors hear, and the capture
-//! rules (`capture_keys`) of the views around it.
+//! rules (`capture_keys`) of the views around it. With no view focused, a
+//! transition goes to the root, uncaptured, and the core hands it to the
+//! app's root view (`Core::key_target`).
 //!
 //! The embedding host reports keys as [`crate::Input::Key`] and
 //! [`crate::Input::KeyRepeat`]: a name, the modifiers the terminal

@@ -1802,6 +1802,7 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>, area: Option<&
                 MenuRole::Paste => (0x56, false),
                 _ => (0x41, false),
             };
+            surface.input.menu_key.set(true);
             crate::input::key(
                 surface,
                 KeyEvent {
@@ -1819,6 +1820,7 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>, area: Option<&
                     translated: false,
                 },
             );
+            surface.input.menu_key.set(false);
         }
         _ => {}
     }

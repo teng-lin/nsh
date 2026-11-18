@@ -6146,15 +6146,18 @@ mod tests {
     fn the_release_follows_the_press_it_belongs_to() {
         let mut app = start_linux(Root::of::<KeyHeld>());
         app.first_render().unwrap();
+        // Tab moves the focus to the pad, which hears Tab's release, as the
+        // DOM's keyup goes to the element focused when it comes.
         app.press_key("tab").unwrap();
+        app.wait_for("released 1").unwrap();
         // Enter and Space press the pad while their key is down; the
         // release comes after what the key did, never before it.
         app.press_key("enter").unwrap();
         app.wait_for("pressed down 1").unwrap();
-        app.wait_for("released 1").unwrap();
+        app.wait_for("released 2").unwrap();
         app.press_key("space").unwrap();
         app.wait_for("pressed down 2").unwrap();
-        app.wait_for("released 2").unwrap();
+        app.wait_for("released 3").unwrap();
     }
 
     /// A disabled view in the main window around a window of the app's own,

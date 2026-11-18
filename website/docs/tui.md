@@ -103,7 +103,8 @@ releases, and Super as Cmd, so `cmd+` shortcuts work there; on macOS terminals w
 binding takes is tried again as Cmd, and menus and hints (`keymap.label`, `Command`) show those shortcuts with
 Ctrl, the key to press there (`⌃O` for `mod+o`).
 
-**Raw key events.** A focused custom view can hear the keys themselves, as on the desktops: `onKeyDown` /
+**Raw key events.** A focused custom view can hear the keys themselves, as on the desktops (with no view focused,
+the app's root view hears them, and no capture rule takes them): `onKeyDown` /
 `onKeyUp` (a Rust view's `on_key_down` / `on_key_up`) report a `KeyEvent` whose `key` is the logical key the
 terminal names (`a`, `A`, `ArrowLeft`, `Enter`), with the modifiers the terminal reports and the `repeat` flag.
 `code` is always empty: a terminal reports no hardware key identity, and the host never derives one from the

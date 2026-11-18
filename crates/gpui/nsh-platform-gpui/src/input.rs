@@ -1453,9 +1453,13 @@ fn source_stroke<'a>(
 }
 
 /// Whether the focused view or an enabled ancestor hears raw keys
-/// (`onKeyDown` / `onKeyUp`) or captures them: only then is a key needed
-/// as the source reported it.
+/// (`onKeyDown` / `onKeyUp`) or captures them, or nothing in the window has
+/// the focus ([`unfocused_root`]: the app's root view there hears them):
+/// only then is a key needed as the source reported it.
 pub(crate) fn hears_keys(surface: &Surface) -> bool {
+    if unfocused_root(surface).is_some() {
+        return true;
+    }
     let Some(view) = crate::key_focus::focused(surface) else {
         return false;
     };
@@ -1466,6 +1470,28 @@ pub(crate) fn hears_keys(surface: &Surface) -> bool {
         return false;
     }
     hears_chain(surface, Some(view))
+}
+
+/// The root node of the window the keys come in ([`ROOT_ID`]: the main
+/// one) when nothing there has the keyboard focus: no custom view of it
+/// (the focus may be in another window of the app's own) and no text
+/// field, and no dialog or modal window takes the keys. A key then goes
+/// to that root, and the core hands it to the app's root view in the
+/// window (`Core::key_target`).
+fn unfocused_root(surface: &Surface) -> Option<NodeId> {
+    // A dialog shown over the app and a modal window of the app's own over
+    // this one keep the window's keys: a release too, as its press went
+    // there. (A host view with GPUI's focus never sends the surface keys:
+    // GPUI dispatches them along the focus path, `crate::events`.)
+    let entered = crate::window::entered(surface);
+    if crate::system::dialog_shown(surface) || crate::window::under_modal(surface, entered) {
+        return None;
+    }
+    let window = entered.unwrap_or(ROOT_ID);
+    let here = |view: &NshView| crate::window::root_of(surface, view) == window;
+    let focused = crate::key_focus::focused(surface).is_some_and(|view| here(&view))
+        || crate::text_input::focused(surface).is_some_and(|view| here(&view));
+    (!focused).then_some(window)
 }
 
 /// The view a keyboard interest or capture walk goes to from `view`: the
@@ -1507,6 +1533,18 @@ fn hears_chain(surface: &Surface, mut current: Option<NshView>) -> bool {
 /// `default_prevented` for this transition, anew. True when the policy
 /// took it: no native default follows.
 pub(crate) fn notify_raw(surface: &Surface, raw: &crate::keys::RawKey) -> bool {
+    let kind = if raw.down {
+        EventKind::KeyDown
+    } else {
+        EventKind::KeyUp
+    };
+    // Nothing has the focus in the window: its root hears the key (the
+    // core hands it to the app's root view there). No capture rule takes
+    // it (they take keys from a focused view), so the defaults still run.
+    if let Some(root) = unfocused_root(surface) {
+        surface.event(root, kind, EventPayload::Key(raw.event(false)));
+        return false;
+    }
     let Some(view) = crate::key_focus::focused(surface) else {
         return false;
     };
@@ -1526,11 +1564,6 @@ pub(crate) fn notify_raw(surface: &Surface, raw: &crate::keys::RawKey) -> bool {
     // the platform's default, so the mounted rules are read here.
     let captured = captures(surface, &view, raw.stroke());
     event.default_prevented = captured;
-    let kind = if raw.down {
-        EventKind::KeyDown
-    } else {
-        EventKind::KeyUp
-    };
     surface.event(view.id(), kind, EventPayload::Key(event));
     captured
 }
@@ -4600,9 +4633,11 @@ mod tests {
         focused.state_mut().props.key_capture = nsh_core::KeyCapture::None;
         focused.state_mut().events.set(EventKind::KeyUp, true);
         assert!(hears_keys(&surface));
-        // Nothing focused (a click leaves the view): no raw key.
+        // Nothing focused (a click leaves the view): the window's root
+        // hears the raw key, and the core hands it to the app's root view.
         focused.state_mut().events.set(EventKind::KeyUp, false);
         crate::key_focus::clear(&surface);
-        assert!(!hears_keys(&surface));
+        assert!(hears_keys(&surface));
+        assert_eq!(unfocused_root(&surface), Some(ROOT_ID));
     }
 }

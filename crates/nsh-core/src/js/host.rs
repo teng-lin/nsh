@@ -537,7 +537,7 @@ export interface Modifiers {
   platform: boolean;
 }
 
-/** A hardware key transition on the focused view: the payload of `onKeyDown` and `onKeyUp` (`nsh_core::KeyEvent`). */
+/** A hardware key transition on the focused view (with nothing focused, the app's root view): the payload of `onKeyDown` and `onKeyUp` (`nsh_core::KeyEvent`). */
 export interface KeyEvent {
   /** The source's logical key: the DOM's spelling for named keys (`"Enter"`, `"ArrowLeft"`), else the character the key reports, in its case and layout. `"Unidentified"` when the source names none. */
   key: string;
@@ -1011,13 +1011,13 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::KeyDown,
         on::ALL,
         "(e: KeyEvent) => void",
-        "A hardware key went down on the focused view or a view inside it on desktop and Web. It bubbles to enabled listening ancestors within the same native window. `defaultPrevented` is the mounted `captureKeys` decision for this transition.",
+        "A hardware key went down on the focused view or a view inside it on desktop and Web; with nothing focused, on the app's root view (or the dialog shown over it). It bubbles to enabled listening ancestors within the same native window. `defaultPrevented` is the mounted `captureKeys` decision for this transition: a key with nothing focused is never captured.",
     ),
     (
         EventKind::KeyUp,
         on::ALL,
         "(e: KeyEvent) => void",
-        "A hardware key came up on the focused view, with this transition's `defaultPrevented` decision; it bubbles as `onKeyDown` does. A window that loses the focus invents no releases.",
+        "A hardware key came up on the focused view (with nothing focused, the app's root view), with this transition's `defaultPrevented` decision; it bubbles as `onKeyDown` does. A window that loses the focus invents no releases.",
     ),
     (
         EventKind::CompositionChange,

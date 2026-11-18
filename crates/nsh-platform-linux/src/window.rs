@@ -430,7 +430,7 @@ pub(crate) fn blocked_by_modal(surface: &Surface, view: &NshView) -> bool {
 }
 
 /// The root node of `window`.
-fn id_of(surface: &Surface, window: &gtk::Window) -> Option<NodeId> {
+pub(crate) fn id_of(surface: &Surface, window: &gtk::Window) -> Option<NodeId> {
     if main_window(surface).as_ref() == Some(window) {
         return Some(ROOT_ID);
     }

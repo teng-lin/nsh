@@ -58,7 +58,9 @@
 //! key's default), so `focus-visible:` shows the right one.
 //!
 //! `NshView` itself is the root stop when no managed view has the focus
-//! (the event goes to [`nsh_core::ROOT_ID`]). A `<modal>` dialog window
+//! (the event goes to [`nsh_core::ROOT_ID`], always reported: the core
+//! hands it to the app's root view, `Core::key_target`, and the root
+//! captures nothing). A `<modal>` dialog window
 //! runs the same dispatch with its own focus, fallback root and Tab order.
 //! An uncaptured Return or Space down that later becomes captured on a
 //! repeat or release is cleared in the native view with a cancelled up, so
@@ -89,7 +91,8 @@
 //! letters lower case, else the Android key code's US character, 39/'л' is
 //! `k`); the raw `key` keeps the actual Unicode. The event goes to the
 //! focused managed view's node id, or [`nsh_core::ROOT_ID`] when `NshView`
-//! itself has the focus; a modal's events go to its dialog root.
+//! itself has the focus (the app's root view hears it); a modal's events go
+//! to its dialog root.
 //!
 //! Checking a change on an emulator needs a hardware-keyboard-capable AVD
 //! and a dev host:
