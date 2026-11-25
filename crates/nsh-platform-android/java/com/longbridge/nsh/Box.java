@@ -601,6 +601,50 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     private boolean hoverPassed;
     /** The last hover this box handled itself was not an exit. */
     private boolean hoverSelf;
+    /** Whether the installed listener received an enter without its exit. */
+    private boolean hoverListenerInside;
+
+    @Override
+    public void setOnHoverListener(View.OnHoverListener listener) {
+        hoverListenerInside = false;
+        if (listener == null) {
+            super.setOnHoverListener(null);
+            return;
+        }
+        // View invokes the listener before onHoverEvent, so that method's
+        // pointerEvents guard cannot protect the engine's hover state.
+        super.setOnHoverListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (pointerEvents == 1 || pointerEvents == 2) {
+                if (hoverListenerInside) {
+                    hoverListenerInside = false;
+                    listenerAs(listener, event, MotionEvent.ACTION_HOVER_EXIT);
+                }
+                return false;
+            }
+            boolean handled = false;
+            if (!hoverListenerInside && action == MotionEvent.ACTION_HOVER_MOVE) {
+                hoverListenerInside = true;
+                handled = listenerAs(listener, event, MotionEvent.ACTION_HOVER_ENTER);
+            }
+            if (action == MotionEvent.ACTION_HOVER_ENTER) hoverListenerInside = true;
+            if (action == MotionEvent.ACTION_HOVER_EXIT) {
+                if (!hoverListenerInside) return false;
+                hoverListenerInside = false;
+            }
+            return listener.onHover(view, event) || handled;
+        });
+    }
+
+    private boolean listenerAs(View.OnHoverListener listener, MotionEvent event, int action) {
+        MotionEvent copy = MotionEvent.obtainNoHistory(event);
+        copy.setAction(action);
+        try {
+            return listener.onHover(this, copy);
+        } finally {
+            copy.recycle();
+        }
+    }
 
     @Override
     protected boolean dispatchHoverEvent(MotionEvent e) {

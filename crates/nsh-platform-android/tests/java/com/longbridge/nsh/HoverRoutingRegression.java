@@ -86,8 +86,12 @@ public final class HoverRoutingRegression extends Instrumentation {
 
     private void expect(String what, boolean overlay, boolean child, boolean below) {
         AtomicReference<String> state = new AtomicReference<>();
-        onMain(() -> state.set("overlay " + host.overlay.isHovered() + ", child " + host.child.isHovered()
-                + ", below " + host.below.isHovered()));
+        onMain(() -> {
+            require(host.listenerInside[0] == overlay && host.listenerInside[1] == child
+                    && host.listenerInside[2] == below, "listener state differs from native hover state");
+            state.set("overlay " + host.overlay.isHovered() + ", child " + host.child.isHovered()
+                    + ", below " + host.below.isHovered());
+        });
         require(state.get().equals("overlay " + overlay + ", child " + child + ", below " + below),
                 what + ": " + state.get());
     }
@@ -119,6 +123,23 @@ public final class HoverRoutingRegression extends Instrumentation {
         FrameLayout root;
         View below;
         Box overlay, child;
+        final boolean[] listenerInside = new boolean[3];
+
+        private void track(View view, int index) {
+            view.setOnHoverListener((target, event) -> {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_HOVER_ENTER) {
+                    require(!listenerInside[index], "duplicate listener enter");
+                    listenerInside[index] = true;
+                } else if (action == MotionEvent.ACTION_HOVER_EXIT) {
+                    require(listenerInside[index], "listener exit without enter");
+                    listenerInside[index] = false;
+                } else if (action == MotionEvent.ACTION_HOVER_MOVE) {
+                    require(listenerInside[index], "listener move without enter");
+                }
+                return false;
+            });
+        }
 
         @Override public void onCreate(Bundle state) {
             super.onCreate(state);
@@ -132,6 +153,9 @@ public final class HoverRoutingRegression extends Instrumentation {
             root.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
             child = new Box(this, owner.mounter(), 3);
             child.setClickable(true);
+            track(overlay, 0);
+            track(child, 1);
+            track(below, 2);
             int side = Math.round(160 * getResources().getDisplayMetrics().density);
             Box.Frame frame = Box.frame(child);
             frame.right = side;
